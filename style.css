@@ -69,7 +69,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13.5px;
   padding: 8px;
   border-radius: 8px;
   cursor: pointer;
@@ -90,14 +90,14 @@ body {
   justify-content: space-between;
   padding-top: 16px;
 }
-.watchlist-view-header h2 { margin: 0; font-size: 18px; color: var(--gold); }
+.watchlist-view-header h2 { margin: 0; font-size: 20.5px; color: var(--gold); }
 .watchlist-view-close {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
   width: 34px; height: 34px;
   border-radius: 8px;
-  font-size: 16px;
+  font-size: 18px;
   cursor: pointer;
 }
 
@@ -118,14 +118,14 @@ body {
 }
 .watchlist-view-list li:active { border-color: var(--gold); }
 .wv-name { font-weight: 700; }
-.wv-code { font-family: var(--mono); color: var(--text-muted); font-size: 12px; margin-left: 6px; }
-.wv-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.wv-code { font-family: var(--mono); color: var(--text-muted); font-size: 13.5px; margin-left: 6px; }
+.wv-meta { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
 .wv-remove {
   float: right;
   background: none;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -134,7 +134,7 @@ body {
 
 .brand {
   margin: 0 0 10px;
-  font-size: 20px;
+  font-size: 23px;
   font-weight: 700;
   letter-spacing: 0.02em;
   display: flex;
@@ -145,7 +145,7 @@ body {
 
 .brand-sub {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.14em;
   color: var(--text-muted);
@@ -156,7 +156,7 @@ body {
 #search {
   width: 100%;
   padding: 12px 14px;
-  font-size: 16px; /* prevents iOS auto-zoom on focus */
+  font-size: 18px; /* prevents iOS auto-zoom on focus */
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -199,9 +199,9 @@ body {
 }
 
 .result-name { font-weight: 600; }
-.result-code { font-family: var(--mono); color: var(--text-muted); font-size: 13px; }
+.result-code { font-family: var(--mono); color: var(--text-muted); font-size: 15px; }
 .result-market {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -222,7 +222,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
   margin-bottom: 14px;
 }
 .status.is-error { border-color: var(--buy); color: #f2b6b8; }
@@ -245,14 +245,14 @@ body {
 
 #stock-name {
   margin: 0 0 6px;
-  font-size: 22px;
+  font-size: 25px;
   font-weight: 700;
 }
 
 .identity-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .tag {
-  font-size: 12px;
+  font-size: 13.5px;
   padding: 3px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -265,7 +265,7 @@ body {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 18px;
+  font-size: 20.5px;
   line-height: 1;
   width: 38px;
   height: 38px;
@@ -294,7 +294,7 @@ body {
   border: 1px solid var(--gold);
   color: var(--gold);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 15px;
   padding: 10px;
   border-radius: 8px;
   cursor: pointer;
@@ -303,7 +303,7 @@ body {
 .watchlist-token-form { margin-top: 10px; }
 
 .add-note {
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
   line-height: 1.6;
   margin: 6px 0;
@@ -313,7 +313,7 @@ body {
 #gh-token-input {
   width: 100%;
   padding: 10px 12px;
-  font-size: 16px;
+  font-size: 18px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -332,7 +332,7 @@ body {
   flex: 1;
   padding: 9px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
   border: 1px solid var(--border);
 }
@@ -352,7 +352,7 @@ body {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12.5px;
   text-decoration: underline;
   cursor: pointer;
   padding: 4px 0;
@@ -375,13 +375,13 @@ body {
   min-width: 84px;
 }
 .stat-chip .stat-label {
-  font-size: 10px;
+  font-size: 11.5px;
   color: var(--text-muted);
   letter-spacing: 0.03em;
 }
 .stat-chip .stat-value {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   margin-top: 2px;
@@ -400,7 +400,7 @@ body {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   padding: 10px 14px;
   cursor: pointer;
@@ -416,7 +416,7 @@ body {
 .tab-panel.is-active { display: block; }
 
 .panel-h {
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
   font-weight: 600;
   margin: 20px 0 8px;
@@ -433,7 +433,7 @@ body {
   color: var(--text-muted);
   border-radius: 8px;
   padding: 5px 12px;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 .period-chip.is-active {
@@ -459,15 +459,15 @@ body {
   padding: 10px;
   text-align: center;
 }
-.tech-card .tc-label { font-size: 10px; color: var(--text-muted); }
+.tech-card .tc-label { font-size: 11.5px; color: var(--text-muted); }
 .tech-card .tc-value {
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   margin-top: 3px;
   font-variant-numeric: tabular-nums;
 }
-.tech-card .tc-note { font-size: 10px; margin-top: 2px; color: var(--text-muted); }
+.tech-card .tc-note { font-size: 11.5px; margin-top: 2px; color: var(--text-muted); }
 
 /* Ledger: the signature masthead number */
 
@@ -478,14 +478,14 @@ body {
 }
 
 .ledger-label {
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 
 .ledger-total {
   font-family: var(--mono);
-  font-size: 40px;
+  font-size: 45.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   margin-top: 4px;
@@ -496,7 +496,7 @@ body {
 .ledger-total.is-flat { color: var(--text-muted); }
 
 .ledger-date {
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
   margin-top: 4px;
   font-family: var(--mono);
@@ -525,7 +525,7 @@ body {
   display: flex;
   gap: 14px;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-muted);
   align-items: center;
 }
@@ -548,7 +548,7 @@ body {
   color: var(--text-muted);
   border-radius: 20px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 .range-chip.is-active {
@@ -575,14 +575,14 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 15px;
 }
 .data-table th {
   text-align: right;
   font-family: var(--sans);
   font-weight: 600;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -606,7 +606,7 @@ body {
 
 .footnote {
   margin-top: 16px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -641,20 +641,20 @@ body {
     width: 52px;
     color: var(--text-muted);
     font-family: var(--sans);
-    font-size: 11px;
+    font-size: 12.5px;
   }
 }
 
 /* Landscape / wide enough: real table, tighten padding a touch */
 @media (min-width: 481px) and (orientation: landscape) {
   #app { padding: 14px 20px; }
-  .ledger-total { font-size: 34px; }
+  .ledger-total { font-size: 39px; }
 }
 
 /* Signal tab: 籌碼結構訊號判讀 */
 
 .signal-intro {
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
   line-height: 1.7;
   margin: 14px 0 6px;
@@ -662,7 +662,7 @@ body {
 .signal-intro strong { color: var(--text); }
 
 .signal-config-label {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-muted);
   margin-top: 16px;
   line-height: 1.5;
@@ -687,12 +687,12 @@ body {
   gap: 8px;
 }
 .signal-card-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
 }
 .signal-card-badge {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 20px;
@@ -705,7 +705,7 @@ body {
 .signal-card-badge.is-flat { color: var(--text-muted); }
 
 .signal-card-reason {
-  font-size: 12.5px;
+  font-size: 14px;
   color: var(--text-muted);
   line-height: 1.7;
   margin: 8px 0 0;
@@ -730,6 +730,6 @@ body {
   padding: 8px 16px;
   cursor: pointer;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
 }
 .favorites-list li:active { border-color: var(--gold); }
