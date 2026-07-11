@@ -4,6 +4,7 @@
 
   const DEFAULT_CODE = "8069"; // 元太科技
   const FAVORITES_KEY = "tif.favorites.v1";
+  const GH_TOKEN_KEY = "tif.githubToken";
   const FINMIND_URL = "https://api.finmindtrade.com/api/v4/data";
 
   const COLORS = {
@@ -26,6 +27,13 @@
     stockMarket: document.getElementById("stock-market"),
     stockIndustry: document.getElementById("stock-industry"),
     pinBtn: document.getElementById("pin-btn"),
+    watchlistAddPanel: document.getElementById("watchlist-add-panel"),
+    watchlistAddBtn: document.getElementById("watchlist-add-btn"),
+    watchlistTokenForm: document.getElementById("watchlist-token-form"),
+    ghTokenInput: document.getElementById("gh-token-input"),
+    ghTokenSave: document.getElementById("gh-token-save"),
+    ghTokenSkip: document.getElementById("gh-token-skip"),
+    watchlistAddStatus: document.getElementById("watchlist-add-status"),
     quickStats: document.getElementById("quick-stats"),
     tabBtns: Array.from(document.querySelectorAll(".tab-btn")),
     panels: {
@@ -213,6 +221,136 @@
     };
   }
 
+  // ---------- add-to-watchlist (reads/writes watchlist.json on GitHub) ----------
+
+  function parseOwnerRepo() {
+    const repoUrl = (window.APP_CONFIG && window.APP_CONFIG.repoUrl) || "";
+    const m = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (!m) return null;
+    return { owner: m[1], repo: m[2].replace(/\.git$/, "") };
+  }
+
+  async function fetchWatchlistRaw(owner, repo) {
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/watchlist.json?t=${Date.now()}`;
+    const res = await fetch(url, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`讀取 watchlist.json 失敗 (HTTP ${res.status})`);
+    return res.json();
+  }
+
+  function b64EncodeUnicode(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+
+  async function writeWatchlistViaApi(owner, repo, token, newList) {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/watchlist.json`;
+    const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
+
+    const getRes = await fetch(apiUrl, { headers });
+    if (!getRes.ok) throw new Error(`讀取失敗 (HTTP ${getRes.status})，token 可能沒有這個 repo 的權限`);
+    const getJson = await getRes.json();
+
+    const content = b64EncodeUnicode(JSON.stringify(newList, null, 2) + "\n");
+    const putRes = await fetch(apiUrl, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: `chore: add ${newList[newList.length - 1]} to watchlist`,
+        content,
+        sha: getJson.sha,
+      }),
+    });
+    if (!putRes.ok) {
+      const text = await putRes.text().catch(() => "");
+      throw new Error(`寫入失敗 (HTTP ${putRes.status}): ${text.slice(0, 150)}`);
+    }
+  }
+
+  function setAddStatus(msg, isError = false) {
+    els.watchlistAddStatus.hidden = !msg;
+    els.watchlistAddStatus.textContent = msg;
+    els.watchlistAddStatus.style.color = isError ? COLORS.buy : "";
+  }
+
+  async function copyFallback(owner, repo, code, currentList) {
+    const newList = currentList ? [...currentList, code] : [code];
+    const text = JSON.stringify(newList, null, 2) + "\n";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch { /* clipboard may be unavailable; instructions still shown */ }
+    const editUrl = owner ? `https://github.com/${owner}/${repo}/edit/main/watchlist.json` : "";
+    setAddStatus(
+      `已把完整清單複製到剪貼簿（含 ${code}）。${editUrl ? "點這裡開啟編輯頁貼上取代全部內容：" + editUrl : "到 GitHub 打開 watchlist.json 貼上取代全部內容。"}下次盤前排程跑完就有完整資料。`
+    );
+  }
+
+  async function handleAddToWatchlist(code) {
+    const or_ = parseOwnerRepo();
+    setAddStatus("處理中…");
+    els.watchlistTokenForm.hidden = true;
+
+    let currentList = null;
+    try {
+      if (or_) currentList = await fetchWatchlistRaw(or_.owner, or_.repo);
+    } catch (e) {
+      console.warn("could not read current watchlist.json:", e.message);
+    }
+
+    if (currentList && currentList.includes(code)) {
+      setAddStatus(`${code} 已經在常駐清單裡了，下次排程就會有完整資料。`);
+      return;
+    }
+
+    const token = localStorage.getItem(GH_TOKEN_KEY);
+    if (token && or_) {
+      try {
+        const newList = currentList ? [...currentList, code] : [code];
+        await writeWatchlistViaApi(or_.owner, or_.repo, token, newList);
+        setAddStatus(`已把 ${code} 加入常駐清單！下次盤前排程（或手動 Run workflow）跑完就有完整六項資料。`);
+        return;
+      } catch (e) {
+        console.warn("auto-write failed:", e.message);
+        localStorage.removeItem(GH_TOKEN_KEY);
+        setAddStatus(`自動寫入失敗（${e.message}），已改用複製方式。`, true);
+        await copyFallback(or_?.owner, or_?.repo, code, currentList);
+        return;
+      }
+    }
+
+    if (!or_) {
+      setAddStatus("尚未在 config.js 設定 repoUrl，無法產生編輯連結；先手動把代號加進 watchlist.json。");
+      return;
+    }
+
+    // no token saved yet -> offer the choice
+    els.watchlistTokenForm.hidden = false;
+    els.watchlistAddStatus.hidden = true;
+    els.watchlistTokenForm.dataset.code = code;
+  }
+
+  function wireWatchlistAddPanel() {
+    els.watchlistAddBtn.addEventListener("click", () => {
+      const code = els.watchlistAddBtn.dataset.code;
+      if (code) handleAddToWatchlist(code);
+    });
+    els.ghTokenSave.addEventListener("click", async () => {
+      const token = els.ghTokenInput.value.trim();
+      const code = els.watchlistTokenForm.dataset.code;
+      if (!token) return;
+      localStorage.setItem(GH_TOKEN_KEY, token);
+      els.ghTokenInput.value = "";
+      els.watchlistTokenForm.hidden = true;
+      if (code) handleAddToWatchlist(code);
+    });
+    els.ghTokenSkip.addEventListener("click", async () => {
+      const code = els.watchlistTokenForm.dataset.code;
+      els.watchlistTokenForm.hidden = true;
+      const or_ = parseOwnerRepo();
+      let currentList = null;
+      try { if (or_) currentList = await fetchWatchlistRaw(or_.owner, or_.repo); } catch { /* ignore */ }
+      await copyFallback(or_?.owner, or_?.repo, code, currentList);
+    });
+  }
+
   async function selectStock(code) {
     location.hash = code;
     setStatus(`載入 ${code} 中…`);
@@ -368,6 +506,16 @@
 
     renderQuickStats(payload);
     renderActiveTab();
+
+    els.watchlistTokenForm.hidden = true;
+    els.watchlistAddStatus.hidden = true;
+    if (payload.live) {
+      els.watchlistAddPanel.hidden = false;
+      els.watchlistAddBtn.dataset.code = code;
+      els.watchlistAddBtn.hidden = false;
+    } else {
+      els.watchlistAddPanel.hidden = true;
+    }
 
     els.stockCard.hidden = false;
     els.emptyState.hidden = true;
@@ -644,6 +792,7 @@
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("service-worker.js").catch(() => {});
     }
+    wireWatchlistAddPanel();
     setStatus("載入股票清單中…");
     await loadStockList();
     setStatus("");

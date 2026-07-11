@@ -86,7 +86,27 @@ index.html / app.js / style.css   前端 PWA（股價／籌碼／法人／借券
 App 會嘗試直接從瀏覽器即時呼叫 FinMind 查「股價」與「法人動態」兩項
 （技術面／籌碼／借券即時模式下不含，因為要另外算/另外抓，即時查詢只做
 最基本兩項以求快）。這需要 FinMind 允許瀏覽器跨網域請求，無法 100% 保證
-成功；查得到但想要完整六項資料的話，建議還是加進 `watchlist.json`。
+成功。
+
+查到即時資料後，畫面上會多一個「＋ 加入常駐清單」按鈕，點下去有兩種結果：
+
+- **有設定 GitHub token**：直接幫你把代號寫進 GitHub 上的 `watchlist.json`
+  （呼叫 GitHub API），下次排程跑完就有完整六項資料。
+- **沒有 token**：把更新後的完整清單複製到剪貼簿，並給你 `watchlist.json`
+  的編輯頁連結，你手動貼上、Commit 即可。
+
+### 設定 token（只需做一次，非必要）
+
+1. GitHub 右上角頭像 → **Settings** → 左側最下面 **Developer settings**
+2. **Personal access tokens** → **Fine-grained tokens** → **Generate new token**
+3. Repository access 選 **Only select repositories**，選你這個 repo
+4. Permissions → **Repository permissions** → **Contents** 設為 **Read and write**，其他都不用動
+5. 產生後複製 token，貼進 App 裡「＋ 加入常駐清單」跳出的欄位
+
+這個 token **只會存在你這支手機瀏覽器的 localStorage 裡**，不會傳到我或
+任何第三方；但它終究是一組有寫入權限的憑證，存在瀏覽器裡代表任何能碰到
+這支手機的人理論上都碰得到它。如果不放心，略過這步驟，全程用複製貼上
+一樣能用，只是要多兩三下手動操作。
 
 ## 注意事項
 
