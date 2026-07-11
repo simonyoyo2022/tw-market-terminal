@@ -1,0 +1,518 @@
+/* ---------------------------------------------------------
+   法人籌碼 — design tokens
+   A dark trading-ledger aesthetic: ink background, gold
+   masthead accent, and a red/green system tied directly to
+   the Taiwan market convention (red = 買超, green = 賣超)
+   rather than a decorative accent color.
+--------------------------------------------------------- */
+:root {
+  --ink: #12141a;
+  --surface: #1b1e27;
+  --surface-2: #20232e;
+  --border: #2a2e3a;
+  --text: #e8e9ed;
+  --text-muted: #8b8f9c;
+  --gold: #d4a24e;
+  --buy: #e5484d;   /* 買超 */
+  --sell: #2f9e5b;  /* 賣超 */
+
+  --sans: -apple-system, "PingFang TC", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: contain;
+}
+
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ---------------- Top bar ---------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(18, 20, 26, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  padding-top: env(safe-area-inset-top);
+}
+
+.topbar-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 16px 12px;
+}
+
+.brand {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--gold);
+}
+
+.brand-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+}
+
+.search-wrap { position: relative; }
+
+#search {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 16px; /* prevents iOS auto-zoom on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+#search:focus {
+  border-color: var(--gold);
+}
+
+.search-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px;
+  position: absolute;
+  left: 0; right: 0;
+  max-height: 55vh;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+  z-index: 30;
+}
+
+.search-results li {
+  padding: 10px 12px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.search-results li:active,
+.search-results li.is-active {
+  background: rgba(212, 162, 78, 0.14);
+}
+
+.result-name { font-weight: 600; }
+.result-code { font-family: var(--mono); color: var(--text-muted); font-size: 13px; }
+.result-market {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+/* ---------------- Main / status ---------------- */
+
+#app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.status {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.status.is-error { border-color: var(--buy); color: #f2b6b8; }
+
+/* ---------------- Stock card ---------------- */
+
+.stock-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.identity-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+#stock-name {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.identity-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tag {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.tag-code { font-family: var(--mono); color: var(--text); }
+.tag-market { color: var(--gold); border-color: rgba(212,162,78,0.35); }
+
+.pin-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pin-btn.is-pinned {
+  color: var(--gold);
+  border-color: rgba(212,162,78,0.5);
+}
+
+/* Quick stats strip (總覽 mini dashboard) */
+
+.quick-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.stat-chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-width: 84px;
+}
+.stat-chip .stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+.stat-chip .stat-value {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+/* Tabs */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 18px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tab-btn.is-active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.tab-panel { display: none; padding-top: 16px; }
+.tab-panel.is-active { display: block; }
+
+.panel-h {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
+
+.period-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.period-chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.period-chip.is-active {
+  background: rgba(212, 162, 78, 0.15);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.chart-tall { height: 200px; }
+.chart-short { height: 90px; }
+
+.tech-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.tech-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.tech-card .tc-label { font-size: 10px; color: var(--text-muted); }
+.tech-card .tc-value {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.tech-card .tc-note { font-size: 10px; margin-top: 2px; color: var(--text-muted); }
+
+/* Ledger: the signature masthead number */
+
+.ledger {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.ledger-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.ledger-total {
+  font-family: var(--mono);
+  font-size: 40px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+  line-height: 1.1;
+}
+.ledger-total.is-buy { color: var(--buy); }
+.ledger-total.is-sell { color: var(--sell); }
+.ledger-total.is-flat { color: var(--text-muted); }
+
+.ledger-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-family: var(--mono);
+}
+
+/* Flow bar: single-row diverging stacked bar, 外資/投信/自營商 */
+
+.flow-bar {
+  margin-top: 14px;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  display: flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.flow-seg { height: 100%; }
+.flow-seg-foreign { background: var(--buy); }
+.flow-seg-trust { background: #f0c869; }
+.flow-seg-dealer { background: #7fb8f5; }
+.flow-seg.is-sell.flow-seg-foreign { background: var(--sell); }
+.flow-seg.is-sell.flow-seg-trust { background: #6fbf8c; }
+.flow-seg.is-sell.flow-seg-dealer { background: #4f8f7a; }
+
+.flow-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  align-items: center;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.dot-foreign { background: var(--buy); }
+.dot-trust { background: #f0c869; }
+.dot-dealer { background: #7fb8f5; }
+
+/* Range chips */
+
+.range-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.range-chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.range-chip.is-active {
+  background: rgba(212, 162, 78, 0.15);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* Chart */
+
+.chart {
+  width: 100%;
+  height: 150px;
+  margin-top: 14px;
+  display: block;
+}
+
+/* Table (landscape / wide) vs cards (portrait / narrow) */
+
+.table-wrap { margin-top: 16px; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.data-table th {
+  text-align: right;
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.data-table th.col-date { text-align: left; }
+.data-table td {
+  text-align: right;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.data-table td.col-date {
+  text-align: left;
+  font-family: var(--sans);
+  color: var(--text-muted);
+}
+.data-table td.col-total { font-weight: 700; }
+.is-buy { color: var(--buy); }
+.is-sell { color: var(--sell); }
+.is-flat { color: var(--text-muted); }
+
+.footnote {
+  margin-top: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* Portrait / narrow: card list instead of a cramped table */
+@media (max-width: 480px), (orientation: portrait) {
+  .data-table thead { display: none; }
+  .data-table, .data-table tbody, .data-table tr, .data-table td {
+    display: block;
+    width: 100%;
+  }
+  .data-table tr {
+    padding: 10px 2px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "date date"
+      "foreign trust"
+      "dealer total";
+    row-gap: 4px;
+  }
+  .data-table td { border-bottom: none; padding: 2px 4px; text-align: left; }
+  .data-table td.col-date { grid-area: date; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .data-table td:nth-of-type(2) { grid-area: foreign; }
+  .data-table td:nth-of-type(3) { grid-area: trust; }
+  .data-table td:nth-of-type(4) { grid-area: dealer; }
+  .data-table td.col-total { grid-area: total; }
+  .data-table td::before {
+    content: attr(data-label);
+    display: inline-block;
+    width: 52px;
+    color: var(--text-muted);
+    font-family: var(--sans);
+    font-size: 11px;
+  }
+}
+
+/* Landscape / wide enough: real table, tighten padding a touch */
+@media (min-width: 481px) and (orientation: landscape) {
+  #app { padding: 14px 20px; }
+  .ledger-total { font-size: 34px; }
+}
+
+/* Empty state / favorites */
+
+.empty-state { text-align: center; padding: 40px 12px; color: var(--text-muted); }
+.favorites-list {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.favorites-list li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 14px;
+}
+.favorites-list li:active { border-color: var(--gold); }

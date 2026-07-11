@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#12141a" />
+<meta name="description" content="個股股價、籌碼、法人動態、借券、技術面查詢" />
+<title>法人籌碼</title>
+
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="法人籌碼" />
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1 class="brand">法人籌碼<span class="brand-sub">MARKET TERMINAL</span></h1>
+    <div class="search-wrap">
+      <input
+        id="search"
+        type="text"
+        inputmode="search"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        placeholder="輸入股票代號或名稱，例如 8069 或 元太"
+      />
+      <ul id="search-results" class="search-results" hidden></ul>
+    </div>
+  </div>
+</header>
+
+<main id="app">
+
+  <section id="status" class="status" hidden></section>
+
+  <section id="stock-card" class="stock-card" hidden>
+    <div class="identity-row">
+      <div class="identity-main">
+        <h2 id="stock-name">—</h2>
+        <div class="identity-tags">
+          <span id="stock-code" class="tag tag-code">—</span>
+          <span id="stock-market" class="tag tag-market">—</span>
+          <span id="stock-industry" class="tag tag-industry"></span>
+        </div>
+      </div>
+      <button id="pin-btn" class="pin-btn" title="加入常用" aria-label="加入常用">☆</button>
+    </div>
+
+    <div id="quick-stats" class="quick-stats"></div>
+
+    <nav class="tabs" role="tablist" aria-label="資料分類">
+      <button class="tab-btn is-active" data-tab="price">股價</button>
+      <button class="tab-btn" data-tab="chips">籌碼</button>
+      <button class="tab-btn" data-tab="inst">法人</button>
+      <button class="tab-btn" data-tab="lending">借券</button>
+    </nav>
+
+    <!-- 股價 / 技術面 -->
+    <section id="tab-price" class="tab-panel is-active">
+      <div class="period-row">
+        <button class="period-chip is-active" data-period="daily">日</button>
+        <button class="period-chip" data-period="monthly">月</button>
+        <button class="period-chip" data-period="quarterly">季</button>
+      </div>
+      <div class="range-row" data-scope="price">
+        <button class="range-chip" data-range="20">20</button>
+        <button class="range-chip is-active" data-range="60">60</button>
+        <button class="range-chip" data-range="120">120</button>
+        <button class="range-chip" data-range="9999">全部</button>
+      </div>
+      <svg id="price-chart" class="chart chart-tall" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>
+      <div class="tech-cards" id="tech-cards"></div>
+      <div class="table-wrap">
+        <table id="price-table" class="data-table">
+          <thead>
+            <tr><th class="col-date">期間</th><th class="col-num">開</th><th class="col-num">高</th><th class="col-num">低</th><th class="col-num">收</th><th class="col-num">量(張)</th></tr>
+          </thead>
+          <tbody id="price-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 籌碼：融資融券 + 外資持股 -->
+    <section id="tab-chips" class="tab-panel">
+      <div class="range-row" data-scope="chips">
+        <button class="range-chip" data-range="10">10</button>
+        <button class="range-chip is-active" data-range="20">20</button>
+        <button class="range-chip" data-range="60">60</button>
+      </div>
+      <h3 class="panel-h">融資融券餘額增減（張）</h3>
+      <svg id="margin-chart" class="chart" viewBox="0 0 600 150" preserveAspectRatio="none"></svg>
+      <div class="table-wrap">
+        <table id="margin-table" class="data-table">
+          <thead><tr><th class="col-date">日期</th><th class="col-num">融資增減</th><th class="col-num">融資餘額</th><th class="col-num">融券增減</th><th class="col-num">融券餘額</th></tr></thead>
+          <tbody id="margin-tbody"></tbody>
+        </table>
+      </div>
+      <h3 class="panel-h">外資持股比例（%）</h3>
+      <svg id="share-chart" class="chart chart-short" viewBox="0 0 600 100" preserveAspectRatio="none"></svg>
+      <p id="chips-empty-note" class="footnote" hidden>此股票沒有籌碼資料（即時查詢模式不含籌碼面，請加入 watchlist.json）。</p>
+    </section>
+
+    <!-- 法人動態 -->
+    <section id="tab-inst" class="tab-panel">
+      <div class="ledger">
+        <div class="ledger-label">最新一日三大法人買賣超合計</div>
+        <div id="ledger-total" class="ledger-total">—</div>
+        <div id="ledger-date" class="ledger-date">—</div>
+      </div>
+      <div id="flow-bar" class="flow-bar" aria-hidden="true"></div>
+      <div class="flow-legend">
+        <span class="dot dot-foreign"></span>外資
+        <span class="dot dot-trust"></span>投信
+        <span class="dot dot-dealer"></span>自營商
+      </div>
+      <div class="range-row" data-scope="inst">
+        <button class="range-chip" data-range="10">10</button>
+        <button class="range-chip is-active" data-range="20">20</button>
+        <button class="range-chip" data-range="60">60</button>
+      </div>
+      <svg id="inst-chart" class="chart" viewBox="0 0 600 150" preserveAspectRatio="none"></svg>
+      <div class="table-wrap">
+        <table id="inst-table" class="data-table">
+          <thead><tr><th class="col-date">日期</th><th class="col-num">外資</th><th class="col-num">投信</th><th class="col-num">自營商</th><th class="col-num col-total">合計</th></tr></thead>
+          <tbody id="inst-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 借券 -->
+    <section id="tab-lending" class="tab-panel">
+      <div class="range-row" data-scope="lending">
+        <button class="range-chip" data-range="10">10</button>
+        <button class="range-chip is-active" data-range="20">20</button>
+        <button class="range-chip" data-range="60">60</button>
+      </div>
+      <h3 class="panel-h">每日借券成交量（張）／平均費率（%）</h3>
+      <svg id="lending-chart" class="chart" viewBox="0 0 600 150" preserveAspectRatio="none"></svg>
+      <div class="table-wrap">
+        <table id="lending-table" class="data-table">
+          <thead><tr><th class="col-date">日期</th><th class="col-num">成交量(張)</th><th class="col-num">平均費率(%)</th></tr></thead>
+          <tbody id="lending-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footnote">單位：張（1張＝1,000股）。紅色為增加／買超，綠色為減少／賣超。券商分點買賣超需 FinMind 付費會員，未包含在本工具中。資料來源：FinMind（源自證交所／櫃買中心公開資料），僅供參考，不構成投資建議。</p>
+  </section>
+
+  <section id="empty-state" class="empty-state">
+    <p>搜尋一檔股票開始查詢，或從下方常用清單選擇。</p>
+    <ul id="favorites-list" class="favorites-list"></ul>
+  </section>
+
+</main>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
