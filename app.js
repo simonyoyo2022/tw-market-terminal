@@ -431,6 +431,19 @@
     return { code: item.code, name: item.name || null, addedAt: item.addedAt || null };
   }
 
+  // Best-effort check against whatever watchlist snapshot we already have in
+  // memory (populated once the "常駐清單" panel has been opened this
+  // session — see cachedWatchlist). Being IN watchlist.json is a different
+  // fact from having a data/stocks/{code}.json cache file: the former is
+  // written instantly by the add-to-watchlist flow, the latter only shows up
+  // after the next scheduled/manual Actions run. If we haven't loaded a
+  // watchlist snapshot yet this session, we simply can't tell — callers
+  // should treat `false` here as "unknown", not "definitely not in the list".
+  function isInCachedWatchlist(code) {
+    if (!cachedWatchlist) return false;
+    return cachedWatchlist.some((item) => normalizeWatchlistEntry(item).code === code);
+  }
+
   function b64EncodeUnicode(str) {
     return btoa(unescape(encodeURIComponent(str)));
   }
@@ -509,7 +522,11 @@
     }
 
     if (currentList && currentList.some((item) => normalizeWatchlistEntry(item).code === code)) {
-      setAddStatus(`${code} 已經在常駐清單裡了，可離線快速查詢。`);
+      cachedWatchlist = currentList;
+      setAddStatus(
+        `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次盤前更新` +
+        `（平日 08:00）或手動到 Actions 頁面點 Run workflow，跑完之後才會變成離線快取。`
+      );
       return;
     }
 
@@ -556,7 +573,11 @@
     if (!or_) return;
     try {
       const list = await fetchWatchlistRaw(or_.owner, or_.repo);
-      const count = cachedWatchlist && cachedWatchlist.length > list.length ? cachedWatchlist.length : list.length;
+      // Opportunistically warm cachedWatchlist here too (this already-paid-for
+      // fetch runs once at boot) so isInCachedWatchlist() works right away,
+      // instead of only after the user has opened the 常駐清單 panel once.
+      if (!cachedWatchlist || list.length > cachedWatchlist.length) cachedWatchlist = list;
+      const count = cachedWatchlist.length;
       els.watchlistViewCount.textContent = `(${count})`;
     } catch { /* ignore */ }
   }
@@ -807,10 +828,27 @@
     els.watchlistAddStatus.hidden = true;
     if (payload.live) {
       els.watchlistAddPanel.hidden = false;
-      els.watchlistAddBtn.dataset.code = code;
-      els.watchlistAddBtn.hidden = false;
-      els.ghTokenReset.hidden = !localStorage.getItem(GH_TOKEN_KEY);
-      updateTokenHint();
+      if (isInCachedWatchlist(code)) {
+        // Already in watchlist.json, just not fetched into data/stocks/ yet —
+        // that only happens on the next scheduled Actions run (or a manual
+        // workflow_dispatch), never immediately after the commit. Showing the
+        // "+ 加入" button again here would be confusing (it IS already added),
+        // so explain the actual wait instead of re-inviting them to add it.
+        els.watchlistAddBtn.hidden = true;
+        els.watchlistTokenHint.hidden = true;
+        els.ghTokenReset.hidden = true;
+        setAddStatus(
+          `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次盤前更新` +
+          `（平日 08:00）或你自己到 GitHub 專案的 Actions 頁面手動 Run workflow，` +
+          `跑完之後才會變成離線快取。在那之前開啟這檔股票都還是會像現在這樣即時查詢一次。`
+        );
+      } else {
+        els.watchlistAddBtn.dataset.code = code;
+        els.watchlistAddBtn.hidden = false;
+        els.watchlistTokenHint.hidden = false;
+        els.ghTokenReset.hidden = !localStorage.getItem(GH_TOKEN_KEY);
+        updateTokenHint();
+      }
     } else {
       els.watchlistAddPanel.hidden = true;
     }
