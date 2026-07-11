@@ -346,6 +346,18 @@ body {
   color: var(--text-muted);
 }
 
+.gh-token-reset {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.gh-token-reset:active { color: var(--buy); }
+
 /* Quick stats strip (總覽 mini dashboard) */
 
 .quick-stats {

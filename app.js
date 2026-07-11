@@ -33,6 +33,7 @@
     ghTokenInput: document.getElementById("gh-token-input"),
     ghTokenSave: document.getElementById("gh-token-save"),
     ghTokenSkip: document.getElementById("gh-token-skip"),
+    ghTokenReset: document.getElementById("gh-token-reset"),
     watchlistAddStatus: document.getElementById("watchlist-add-status"),
     watchlistViewBtn: document.getElementById("watchlist-view-btn"),
     watchlistViewCount: document.getElementById("watchlist-view-count"),
@@ -497,13 +498,10 @@
         return;
       } catch (e) {
         console.warn("auto-write failed:", e.message);
-        const isAuthError = /HTTP 401|HTTP 403/.test(e.message);
-        if (isAuthError) {
-          localStorage.removeItem(GH_TOKEN_KEY);
-          setAddStatus(`Token 似乎沒有權限或已失效（${e.message}），已改用複製方式；下次會再問你要不要重新設定 token。`, true);
-        } else {
-          setAddStatus(`自動寫入失敗（${e.message}），已改用複製方式。Token 還留著，下次會直接重試，不用重貼。`, true);
-        }
+        setAddStatus(
+          `自動寫入失敗（${e.message}）。Token 還留著沒清掉；如果你確定是 token 本身失效，可以到下面「清除已存的 token」重設。這次先用複製方式：`,
+          true
+        );
         await copyFallback(or_?.owner, or_?.repo, code, currentList);
         return;
       }
@@ -586,6 +584,7 @@
       const code = els.watchlistTokenForm.dataset.code;
       if (!token) return;
       localStorage.setItem(GH_TOKEN_KEY, token);
+      els.ghTokenReset.hidden = false;
       els.ghTokenInput.value = "";
       els.watchlistTokenForm.hidden = true;
       if (code) handleAddToWatchlist(code);
@@ -602,6 +601,11 @@
     els.watchlistViewClose.addEventListener("click", closeWatchlistView);
     els.favoritesViewBtn.addEventListener("click", openFavoritesView);
     els.favoritesViewClose.addEventListener("click", closeFavoritesView);
+    els.ghTokenReset.addEventListener("click", () => {
+      localStorage.removeItem(GH_TOKEN_KEY);
+      els.ghTokenReset.hidden = true;
+      setAddStatus("已清除已存的 token，下次點「加入常駐清單」會重新問你要不要輸入。");
+    });
   }
 
   async function selectStock(code) {
@@ -766,6 +770,7 @@
       els.watchlistAddPanel.hidden = false;
       els.watchlistAddBtn.dataset.code = code;
       els.watchlistAddBtn.hidden = false;
+      els.ghTokenReset.hidden = !localStorage.getItem(GH_TOKEN_KEY);
     } else {
       els.watchlistAddPanel.hidden = true;
     }
