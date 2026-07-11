@@ -7,7 +7,7 @@
 // could get stuck showing an old cached version for a long time.
 //
 // Bump CACHE_VERSION any time you want to force clients to drop old caches.
-const CACHE_VERSION = "tif-v2";
+const CACHE_VERSION = "tif-v3";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -39,7 +39,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "reload" })
       .then((res) => {
         const clone = res.clone();
         caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, clone));
