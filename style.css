@@ -56,6 +56,13 @@ body {
   padding: 14px 16px 12px;
 }
 
+.header-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.header-btn-row .watchlist-view-btn { margin-top: 0; }
+
 .watchlist-view-btn {
   margin-top: 10px;
   width: 100%;
@@ -113,6 +120,17 @@ body {
 .wv-name { font-weight: 700; }
 .wv-code { font-family: var(--mono); color: var(--text-muted); font-size: 12px; margin-left: 6px; }
 .wv-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.wv-remove {
+  float: right;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wv-remove:active { border-color: var(--buy); color: var(--buy); }
 
 .brand {
   margin: 0 0 10px;

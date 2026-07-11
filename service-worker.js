@@ -1,5 +1,13 @@
 // service-worker.js
-const CACHE_VERSION = "tif-v1";
+//
+// Network-first everywhere: always try to fetch the latest version from
+// GitHub Pages first, and only fall back to the cached copy if the network
+// request fails (offline). This trades a tiny bit of speed for always
+// showing your latest deploy — with cache-first, updated app.js/index.html
+// could get stuck showing an old cached version for a long time.
+//
+// Bump CACHE_VERSION any time you want to force clients to drop old caches.
+const CACHE_VERSION = "tif-v2";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -28,24 +36,15 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return; // let cross-origin (FinMind live lookups) pass straight through
+  if (event.request.method !== "GET") return;
 
-  const isData = url.pathname.includes("/data/");
-
-  if (isData) {
-    // Network-first for data JSON so it refreshes when online, falling back to cache offline.
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          const clone = res.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, clone));
-          return res;
-        })
-        .catch(() => caches.match(event.request))
-    );
-  } else {
-    // Cache-first for the app shell.
-    event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request))
-    );
-  }
+  event.respondWith(
+    fetch(event.request)
+      .then((res) => {
+        const clone = res.clone();
+        caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, clone));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
+  );
 });

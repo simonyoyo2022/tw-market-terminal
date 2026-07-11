@@ -33,9 +33,22 @@
       />
       <ul id="search-results" class="search-results" hidden></ul>
     </div>
-    <button id="watchlist-view-btn" class="watchlist-view-btn">常駐清單 <span id="watchlist-view-count"></span></button>
+    <div class="header-btn-row">
+      <button id="favorites-view-btn" class="watchlist-view-btn">自選股 <span id="favorites-view-count"></span></button>
+      <button id="watchlist-view-btn" class="watchlist-view-btn">常駐清單 <span id="watchlist-view-count"></span></button>
+    </div>
   </div>
 </header>
+
+<div id="favorites-view-panel" class="watchlist-view-panel" hidden>
+  <div class="watchlist-view-header">
+    <h2>自選股</h2>
+    <button id="favorites-view-close" class="watchlist-view-close" aria-label="關閉">✕</button>
+  </div>
+  <p class="add-note">存在這支手機瀏覽器裡的個人清單，跟 GitHub 上的常駐清單是分開的兩件事。</p>
+  <p id="favorites-view-status" class="add-note"></p>
+  <ul id="favorites-view-list" class="watchlist-view-list"></ul>
+</div>
 
 <div id="watchlist-view-panel" class="watchlist-view-panel" hidden>
   <div class="watchlist-view-header">

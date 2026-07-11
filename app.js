@@ -40,6 +40,12 @@
     watchlistViewClose: document.getElementById("watchlist-view-close"),
     watchlistViewStatus: document.getElementById("watchlist-view-status"),
     watchlistViewList: document.getElementById("watchlist-view-list"),
+    favoritesViewBtn: document.getElementById("favorites-view-btn"),
+    favoritesViewCount: document.getElementById("favorites-view-count"),
+    favoritesViewPanel: document.getElementById("favorites-view-panel"),
+    favoritesViewClose: document.getElementById("favorites-view-close"),
+    favoritesViewStatus: document.getElementById("favorites-view-status"),
+    favoritesViewList: document.getElementById("favorites-view-list"),
     quickStats: document.getElementById("quick-stats"),
     tabBtns: Array.from(document.querySelectorAll(".tab-btn")),
     panels: {
@@ -86,11 +92,17 @@
     const list = loadFavorites();
     const i = list.indexOf(code);
     if (i >= 0) list.splice(i, 1); else list.unshift(code);
-    saveFavorites(list.slice(0, 12));
+    saveFavorites(list.slice(0, 100));
+    renderFavorites();
+  }
+  function removeFavorite(code) {
+    saveFavorites(loadFavorites().filter((c) => c !== code));
     renderFavorites();
   }
   function renderFavorites() {
     const favs = loadFavorites();
+    els.favoritesViewCount.textContent = favs.length ? `(${favs.length})` : "";
+
     els.favoritesList.innerHTML = "";
     for (const code of favs) {
       const entry = stockIndex && stockIndex.get(code);
@@ -99,6 +111,39 @@
       li.addEventListener("click", () => selectStock(code));
       els.favoritesList.appendChild(li);
     }
+
+    els.favoritesViewList.innerHTML = "";
+    if (favs.length === 0) {
+      els.favoritesViewStatus.textContent = "還沒有自選股。查看任何股票時，點名稱旁邊的 ☆ 就能加進來。";
+    } else {
+      els.favoritesViewStatus.textContent = `共 ${favs.length} 檔。`;
+      for (const code of favs) {
+        const entry = stockIndex && stockIndex.get(code);
+        const li = document.createElement("li");
+        li.innerHTML =
+          `<span class="wv-name">${escapeHtml(entry ? entry.name : code)}</span><span class="wv-code">${code}</span>` +
+          `<div class="wv-meta">${entry ? entry.market : ""}</div>` +
+          `<button class="wv-remove" data-code="${code}" aria-label="移除">移除</button>`;
+        li.addEventListener("click", (e) => {
+          if (e.target.closest(".wv-remove")) {
+            e.stopPropagation();
+            removeFavorite(code);
+            return;
+          }
+          closeFavoritesView();
+          selectStock(code);
+        });
+        els.favoritesViewList.appendChild(li);
+      }
+    }
+  }
+
+  function openFavoritesView() {
+    renderFavorites();
+    els.favoritesViewPanel.hidden = false;
+  }
+  function closeFavoritesView() {
+    els.favoritesViewPanel.hidden = true;
   }
 
   // ---------- stock list / search ----------
@@ -550,6 +595,8 @@
     });
     els.watchlistViewBtn.addEventListener("click", openWatchlistView);
     els.watchlistViewClose.addEventListener("click", closeWatchlistView);
+    els.favoritesViewBtn.addEventListener("click", openFavoritesView);
+    els.favoritesViewClose.addEventListener("click", closeFavoritesView);
   }
 
   async function selectStock(code) {
