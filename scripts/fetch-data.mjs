@@ -1,14 +1,43 @@
 // scripts/fetch-data.mjs
 //
-// Pulls a full daily snapshot per watchlist stock from FinMind's free open
-// API (https://finmindtrade.com): price, valuation (PER/PBR), 三大法人買賣超,
-// 融資融券, 外資持股, 借券. Monthly/quarterly bars and technical indicators
-// (EMA/RSI/MACD) are derived locally from the daily price series, since
-// FinMind's month/week K-line endpoints require a paid tier.
+// Pulls a full daily snapshot per watchlist stock: price, valuation
+// (PER/PBR), 三大法人買賣超, 融資融券, 外資持股, 借券. Monthly/quarterly bars
+// and technical indicators (EMA/RSI/MACD) are derived locally from the daily
+// price series.
 //
-// NOT INCLUDED: 券商分點買賣超 (broker-branch trading detail). FinMind only
-// exposes that via TaiwanStockTradingDailyReport, which is sponsor
-// (paid)-tier only. See README.md for details/alternatives.
+// Data sources, per dataset:
+//   price / valuation / shareholding / lending  → FinMind (unchanged)
+//   三大法人買賣超 (上市 stocks)                  → TWSE T86 official report,
+//                                                  FinMind fallback
+//   融資融券 (上市 stocks)                        → TWSE MI_MARGN official
+//                                                  OpenAPI, FinMind fallback
+//   三大法人 / 融資融券 (上櫃 stocks)              → FinMind (see note below)
+//
+// Why 三大法人/融資融券 moved off FinMind for 上市 stocks: FinMind's free tier
+// occasionally has unit/field surprises (see the toLots() note below — this
+// bit us once already), whereas TWSE's own OpenAPI is the source of truth.
+// TWSE's official endpoints only return a single day's snapshot (no
+// date-range query), which is fine for *this* script because it runs daily
+// and accumulates one more day into data/stocks/{code}.json each time — see
+// mergeDailySeries(). It would NOT be fine for app.js's browser-side
+// fetchLive() (arbitrary stock lookup, needs ~130 days in one shot), so that
+// path intentionally keeps using FinMind's ranged query. This is also why
+// 上櫃 (TPEx) stocks still use FinMind here: TPEx has an equivalent official
+// per-stock institutional/margin OpenAPI, but its exact endpoint shape
+// wasn't verified against a live response while building this (this sandbox
+// has no network access to test with) — safer to leave 上櫃 alone than ship
+// a guessed integration. If you want 上櫃 stocks on the official source too,
+// check https://www.tpex.org.tw/openapi/ for the exact dataset names/fields
+// and mirror the twseMarginSnapshot/twseInstitutionalSnapshot functions
+// below.
+//
+// Every official-source call is wrapped so that any failure (network error,
+// unexpected response shape, code not found in that day's snapshot) falls
+// back to the exact FinMind call this script used before — so a live-run
+// surprise degrades to "same as before", never to "no data". Check the
+// GitHub Actions log after the first run: a `[official]` line means TWSE's
+// data was used for that stock; `[finmind-fallback: ...]` means it fell
+// back, with the reason.
 //
 // Run locally:   node scripts/fetch-data.mjs
 // In CI:         set FINMIND_TOKEN as a repo secret to raise the rate limit
@@ -68,6 +97,101 @@ async function callFinMind(params, { retries = 2 } = {}) {
     }
   }
   return [];
+}
+
+// ---------- official TWSE sources for 三大法人 / 融資融券 (上市 stocks) ----------
+
+const TWSE_MARGIN_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN";
+const TWSE_T86_URL = "https://www.twse.com.tw/fund/T86";
+
+function ymdCompact(iso) {
+  return iso.replace(/-/g, "");
+}
+function numTW(v) {
+  if (v == null) return 0;
+  const n = Number(String(v).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function fetchJsonSafe(url, label) {
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (tw-market-terminal)" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`  [official] ${label} fetch failed: ${err.message}`);
+    return null;
+  }
+}
+
+// TWSE 集中市場融資融券餘額 (all 上市 stocks, single latest-day snapshot).
+// Confirmed against https://openapi.twse.com.tw/v1/swagger.json — flat array,
+// Chinese field names, values as comma-formatted numeric strings, no date
+// field (it's always "whatever TWSE currently has settled").
+async function fetchTwseMarginSnapshot() {
+  const json = await fetchJsonSafe(TWSE_MARGIN_URL, "TWSE MI_MARGN (融資融券)");
+  if (!Array.isArray(json)) return new Map();
+  const map = new Map();
+  for (const r of json) {
+    const code = r["股票代號"];
+    if (!code) continue;
+    map.set(code, {
+      marginBalance: numTW(r["融資今日餘額"]),
+      marginChange: numTW(r["融資買進"]) - numTW(r["融資賣出"]) - numTW(r["融資現金償還"]),
+      shortBalance: numTW(r["融券今日餘額"]),
+      shortChange: numTW(r["融券賣出"]) - numTW(r["融券買進"]) - numTW(r["融券現券償還"]),
+    });
+  }
+  return map;
+}
+
+// TWSE 三大法人買賣超日報 (T86, all 上市 stocks, single day specified by
+// `dateISO`). This is TWSE's long-standing report endpoint (not part of the
+// Swagger-documented catalog, but a stable, widely-used pattern) — response
+// shape is the classic TWSE report JSON: { fields: [...], data: [[...], ...] }.
+// If that shape ever changes, iCode below comes back -1 and this safely
+// returns an empty map (→ every stock falls back to FinMind that run).
+async function fetchTwseInstitutionalSnapshot(dateISO) {
+  const url = `${TWSE_T86_URL}?response=json&date=${ymdCompact(dateISO)}&selectType=ALLBUT0999`;
+  const json = await fetchJsonSafe(url, "TWSE T86 (三大法人)");
+  if (!json || !Array.isArray(json.data) || !Array.isArray(json.fields)) return new Map();
+
+  const idx = (name) => json.fields.indexOf(name);
+  const iCode = idx("證券代號");
+  const iForeignNet = idx("外陸資買賣超股數(不含外資自營商)");
+  const iForeignDealerNet = idx("外資自營商買賣超股數");
+  const iTrustNet = idx("投信買賣超股數");
+  const iDealerNet = idx("自營商買賣超股數");
+  if (iCode === -1) {
+    console.warn("  [official] TWSE T86 response shape didn't match expected columns — falling back to FinMind for all 上市 stocks today");
+    return new Map();
+  }
+
+  const toLots = (shares) => Math.round(shares / 1000);
+  const map = new Map();
+  for (const row of json.data) {
+    const code = String(row[iCode]).trim();
+    const foreignShares = (iForeignNet > -1 ? numTW(row[iForeignNet]) : 0) + (iForeignDealerNet > -1 ? numTW(row[iForeignDealerNet]) : 0);
+    const trustShares = iTrustNet > -1 ? numTW(row[iTrustNet]) : 0;
+    const dealerShares = iDealerNet > -1 ? numTW(row[iDealerNet]) : 0;
+    const foreign = toLots(foreignShares);
+    const trust = toLots(trustShares);
+    const dealer = toLots(dealerShares);
+    map.set(code, { foreign, trust, dealer, total: foreign + trust + dealer });
+  }
+  return map;
+}
+
+// Merges one day's official-source row into a previously-cached daily
+// series: replaces the row if that date is already present (re-running the
+// same day), appends otherwise, then trims to the rolling history window.
+// This is how the cache gradually becomes official-sourced day by day while
+// preserving whatever history (FinMind-sourced or otherwise) came before.
+function mergeDailySeries(previousRows, todayRow, historyDays) {
+  const byDate = new Map((previousRows || []).map((r) => [r.date, r]));
+  if (todayRow) byDate.set(todayRow.date, todayRow);
+  const cutoff = daysAgoISO(historyDays);
+  return [...byDate.values()].filter((r) => r.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ---------- technical indicators (computed locally, no paid endpoint needed) ----------
@@ -190,6 +314,7 @@ async function fetchStockList() {
     JSON.stringify({ updatedAt: new Date().toISOString(), list })
   );
   console.log(`  saved ${list.length} companies -> data/stock-list.json`);
+  return list;
 }
 
 async function fetchPrice(code) {
@@ -225,7 +350,7 @@ async function fetchValuation(code) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-async function fetchInstitutional(code) {
+async function fetchInstitutionalFinMind(code) {
   const rows = await callFinMind({
     dataset: "TaiwanStockInstitutionalInvestorsBuySellWide",
     data_id: code,
@@ -255,7 +380,7 @@ async function fetchInstitutional(code) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-async function fetchMargin(code) {
+async function fetchMarginFinMind(code) {
   const rows = await callFinMind({
     dataset: "TaiwanStockMarginPurchaseShortSale",
     data_id: code,
@@ -271,6 +396,32 @@ async function fetchMargin(code) {
       shortChange: (r.ShortSaleSell || 0) - (r.ShortSaleBuy || 0) - (r.ShortSaleCashRepayment || 0),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Picks the official TWSE snapshot for `code` when available (上市 stocks,
+// snapshot fetch succeeded, code present in it), merges it into the
+// previously-cached series, and falls back to a full FinMind range fetch
+// otherwise — covering 上櫃 stocks, snapshot fetch failures, and codes
+// missing from a given day's snapshot (e.g. newly listed, or the market was
+// closed).
+async function fetchInstitutionalForStock(code, market, officialInst, snapshotDate, previousRows) {
+  if (market === "上市" && officialInst && officialInst.has(code) && snapshotDate) {
+    const row = officialInst.get(code);
+    console.log(`  [official] ${code} 三大法人 <- TWSE T86 (${snapshotDate})`);
+    return mergeDailySeries(previousRows, { date: snapshotDate, ...row }, CHIP_HISTORY_DAYS);
+  }
+  console.log(`  [finmind-fallback] ${code} 三大法人 (market=${market}, in snapshot=${officialInst ? officialInst.has(code) : "n/a"})`);
+  return fetchInstitutionalFinMind(code);
+}
+
+async function fetchMarginForStock(code, market, officialMargin, snapshotDate, previousRows) {
+  if (market === "上市" && officialMargin && officialMargin.has(code) && snapshotDate) {
+    const row = officialMargin.get(code);
+    console.log(`  [official] ${code} 融資融券 <- TWSE MI_MARGN (${snapshotDate})`);
+    return mergeDailySeries(previousRows, { date: snapshotDate, ...row }, CHIP_HISTORY_DAYS);
+  }
+  console.log(`  [finmind-fallback] ${code} 融資融券 (market=${market}, in snapshot=${officialMargin ? officialMargin.has(code) : "n/a"})`);
+  return fetchMarginFinMind(code);
 }
 
 async function fetchShareholding(code) {
@@ -344,14 +495,25 @@ async function cleanupOrphanedStockFiles(watchlist) {
   }
 }
 
-async function fetchStock(code) {
-  const price = await fetchPrice(code);
-  await sleep(250);
+// Reads a stock's previously-cached data/stocks/{code}.json, if any, BEFORE
+// this run overwrites it — needed so the official-source institutional/
+// margin fetch can merge "today" into existing history instead of clobbering
+// it. Returns null on first run / missing file (mergeDailySeries handles
+// that fine — it just starts a fresh series).
+async function loadPreviousStockFile(code) {
+  try {
+    return JSON.parse(await fs.readFile(path.join(STOCKS_DIR, `${code}.json`), "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+async function fetchStockRest(code, price, { market, previous, officialMargin, officialInst, snapshotDate }) {
   const valuation = await fetchValuation(code);
   await sleep(250);
-  const institutional = await fetchInstitutional(code);
+  const institutional = await fetchInstitutionalForStock(code, market, officialInst, snapshotDate, previous?.institutional);
   await sleep(250);
-  const margin = await fetchMargin(code);
+  const margin = await fetchMarginForStock(code, market, officialMargin, snapshotDate, previous?.margin);
   await sleep(250);
   const shareholding = await fetchShareholding(code);
   await sleep(250);
@@ -390,18 +552,45 @@ async function main() {
     return;
   }
 
+  let stockList = [];
   try {
-    await fetchStockList();
+    stockList = await fetchStockList();
   } catch (e) {
     console.error("stock-list.json fetch failed (search/autocomplete will be stale):", e.message);
   }
+  const marketByCode = new Map(stockList.map((s) => [s.code, s.market]));
+
+  // TWSE's official 三大法人/融資融券 snapshots cover the whole market in one
+  // call each, so they're fetched once per run (not once per stock) and
+  // reused below. "Once" is primed lazily from the first 上市 watchlist
+  // stock's own latest settled price date, so the snapshot's implicit date
+  // lines up with the price series being cached alongside it, instead of
+  // guessing today's date (pre-market runs are pulling yesterday's settled
+  // data, so "today" would be wrong).
+  let officialMargin = null;
+  let officialInst = null;
+  let snapshotDate = null;
 
   const ok = [];
   const failed = [];
   for (const code of watchlist) {
     console.log(`Fetching full snapshot for ${code}...`);
     try {
-      const payload = await fetchStock(code);
+      const market = marketByCode.get(code) || null;
+      const previous = await loadPreviousStockFile(code);
+      const price = await fetchPrice(code);
+      await sleep(250);
+
+      if (snapshotDate === null && market === "上市" && price.length) {
+        snapshotDate = price[price.length - 1].date;
+        console.log(`  priming official TWSE snapshots for ${snapshotDate}...`);
+        officialMargin = await fetchTwseMarginSnapshot();
+        await sleep(250);
+        officialInst = await fetchTwseInstitutionalSnapshot(snapshotDate);
+        await sleep(250);
+      }
+
+      const payload = await fetchStockRest(code, price, { market, previous, officialMargin, officialInst, snapshotDate });
       await fs.writeFile(path.join(STOCKS_DIR, `${code}.json`), JSON.stringify(payload));
       console.log(
         `  ✓ ${code}: price=${payload.price.daily.length} inst=${payload.institutional.length} ` +
