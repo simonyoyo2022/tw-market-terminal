@@ -64,6 +64,7 @@
   let currentPayload = null;
   let currentTab = "price";
   let pricePeriod = "daily";
+  let cachedWatchlist = null; // most recently known-good watchlist entries (guards against raw.githubusercontent.com's CDN lag after a write)
   const ranges = { price: 60, chips: 20, inst: 20, lending: 20 };
 
   // ---------- generic helpers ----------
@@ -494,7 +495,8 @@
         const newList = currentList ? [...currentList, entry] : [entry];
         await writeWatchlistViaApi(or_.owner, or_.repo, token, newList, code);
         setAddStatus(`已把 ${code} 加入常駐清單！下次盤前排程（或手動 Run workflow）跑完就會快取，之後開啟更快、可離線查詢。`);
-        renderWatchlistCount();
+        cachedWatchlist = newList; // GitHub's raw-content CDN can lag a few minutes behind a just-made commit; use what we know we just wrote instead of re-fetching immediately.
+        renderWatchlistCount(newList.length);
         return;
       } catch (e) {
         console.warn("auto-write failed:", e.message);
@@ -520,12 +522,17 @@
 
   // ---------- watchlist log viewer ----------
 
-  async function renderWatchlistCount() {
+  async function renderWatchlistCount(knownCount) {
+    if (knownCount != null) {
+      els.watchlistViewCount.textContent = `(${knownCount})`;
+      return;
+    }
     const or_ = parseOwnerRepo();
     if (!or_) return;
     try {
       const list = await fetchWatchlistRaw(or_.owner, or_.repo);
-      els.watchlistViewCount.textContent = `(${list.length})`;
+      const count = cachedWatchlist && cachedWatchlist.length > list.length ? cachedWatchlist.length : list.length;
+      els.watchlistViewCount.textContent = `(${count})`;
     } catch { /* ignore */ }
   }
 
@@ -541,13 +548,18 @@
     }
     try {
       const raw = await fetchWatchlistRaw(or_.owner, or_.repo);
-      const entries = raw.map(normalizeWatchlistEntry);
+      const usingCache = cachedWatchlist && cachedWatchlist.length > raw.length;
+      const source = usingCache ? cachedWatchlist : raw;
+      cachedWatchlist = source;
+      const entries = source.map(normalizeWatchlistEntry);
       // most-recently-added first; entries without a timestamp (legacy/manual) sort last, original order preserved among themselves
       const withTime = entries.filter((e) => e.addedAt).sort((a, b) => b.addedAt.localeCompare(a.addedAt));
       const withoutTime = entries.filter((e) => !e.addedAt);
       const ordered = [...withTime, ...withoutTime];
 
-      els.watchlistViewStatus.textContent = `共 ${entries.length} 檔，資料每日盤前 08:00 自動更新。`;
+      els.watchlistViewStatus.textContent = usingCache
+        ? `共 ${entries.length} 檔（剛加入的項目 GitHub 那邊還在同步，可能要等幾分鐘才會出現在 raw 檔案上，但這裡先顯示正確結果）。`
+        : `共 ${entries.length} 檔，資料每日盤前 08:00 自動更新。`;
       els.watchlistViewCount.textContent = `(${entries.length})`;
 
       els.watchlistViewList.innerHTML = "";
