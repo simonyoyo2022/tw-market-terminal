@@ -5,6 +5,14 @@
   const DEFAULT_CODE = "8069"; // 元太科技
   const FAVORITES_KEY = "tif.favorites.v1";
   const GH_TOKEN_KEY = "tif.githubToken";
+  // Separate, version-independent Cache Storage bucket for a backup copy of
+  // the token. Must exactly match TOKEN_CACHE_NAME in service-worker.js,
+  // which is deliberately excluded from the CACHE_VERSION cleanup so this
+  // survives every future deploy. See getGithubToken() for why this exists:
+  // iOS Safari has been observed clearing localStorage for this app within
+  // a couple of hours while leaving Cache Storage entries untouched.
+  const TOKEN_CACHE_NAME = "tif-token-store";
+  const TOKEN_CACHE_URL = new URL("__gh_token__", location.href).href;
   const FINMIND_URL = "https://api.finmindtrade.com/api/v4/data";
 
   const COLORS = {
@@ -67,6 +75,33 @@
   let currentTab = "price";
   let pricePeriod = "daily";
   let cachedWatchlist = null; // most recently known-good watchlist entries (guards against raw.githubusercontent.com's CDN lag after a write)
+  let cachedWatchlistAt = 0; // when cachedWatchlist was last set from a write WE just made
+  const CACHED_WATCHLIST_TRUST_MS = 5 * 60 * 1000; // how long to keep preferring it over a fresh CDN read
+
+  // Whether to prefer our own in-memory cachedWatchlist over a freshly
+  // fetched `raw` list from GitHub's raw-content CDN. Needed because that
+  // CDN can lag a few minutes behind a commit we just made — for either an
+  // add (cachedWatchlist longer than raw) or a remove (cachedWatchlist
+  // shorter than raw), so this checks a plain length mismatch rather than
+  // "longer than". Bounded by CACHED_WATCHLIST_TRUST_MS so that after a
+  // while we go back to trusting fresh reads (e.g. picking up a change made
+  // from another device), instead of trusting a self-made snapshot forever.
+  function shouldTrustCachedWatchlist(raw) {
+    if (!cachedWatchlist) return false;
+    if (Date.now() - cachedWatchlistAt > CACHED_WATCHLIST_TRUST_MS) return false;
+    return cachedWatchlist.length !== raw.length;
+  }
+
+  // Adopt a list as the current known-good snapshot AND refresh the trust
+  // timestamp — use this whenever `list` is freshly proven correct (a write
+  // we just made ourselves, or a CDN read we've decided to trust). Do NOT
+  // call this when merely continuing to rely on an older cachedWatchlist
+  // (see shouldTrustCachedWatchlist's bounded trust window) — that would
+  // keep resetting the clock and defeat the point of the bound.
+  function adoptWatchlistSnapshot(list) {
+    cachedWatchlist = list;
+    cachedWatchlistAt = Date.now();
+  }
   const ranges = { price: 60, chips: 20, inst: 20, lending: 20, signalLookback: 10, marginRatio: 60 };
 
   // ---------- generic helpers ----------
@@ -448,7 +483,7 @@
     return btoa(unescape(encodeURIComponent(str)));
   }
 
-  async function writeWatchlistViaApi(owner, repo, token, newList, addedCode) {
+  async function writeWatchlistViaApi(owner, repo, token, newList, commitMessage) {
     const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/watchlist.json`;
     const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
 
@@ -461,7 +496,7 @@
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: `chore: add ${addedCode} to watchlist`,
+        message: commitMessage,
         content,
         sha: getJson.sha,
       }),
@@ -470,6 +505,57 @@
       const text = await putRes.text().catch(() => "");
       throw new Error(`寫入失敗 (HTTP ${putRes.status}): ${text.slice(0, 150)}`);
     }
+  }
+
+  // ---------- GitHub token storage (localStorage + Cache Storage backup) ----------
+  //
+  // localStorage is the fast, synchronous primary copy. The Cache Storage
+  // bucket is a slower-but-sturdier backup: a user report + a check of
+  // Settings → Safari → Advanced → Website Data confirmed that iOS Safari
+  // can clear this app's localStorage (wiping the saved token) within a
+  // couple of hours, while its Service-Worker Cache Storage entries — the
+  // same mechanism holding the cached app shell/data — survived untouched.
+  // So every read goes through getGithubToken(), which falls back to the
+  // backup and silently repairs localStorage when the fast copy is missing.
+
+  async function persistTokenBackup(token) {
+    if (!("caches" in window)) return;
+    try {
+      const cache = await caches.open(TOKEN_CACHE_NAME);
+      await cache.put(TOKEN_CACHE_URL, new Response(token));
+    } catch (e) { /* best effort only */ }
+  }
+  async function clearTokenBackup() {
+    if (!("caches" in window)) return;
+    try {
+      const cache = await caches.open(TOKEN_CACHE_NAME);
+      await cache.delete(TOKEN_CACHE_URL);
+    } catch (e) { /* best effort only */ }
+  }
+  async function readTokenBackup() {
+    if (!("caches" in window)) return null;
+    try {
+      const cache = await caches.open(TOKEN_CACHE_NAME);
+      const res = await cache.match(TOKEN_CACHE_URL);
+      return res ? await res.text() : null;
+    } catch (e) { return null; }
+  }
+  async function getGithubToken() {
+    const local = localStorage.getItem(GH_TOKEN_KEY);
+    if (local) return local;
+    const backup = await readTokenBackup();
+    if (backup) {
+      try { localStorage.setItem(GH_TOKEN_KEY, backup); } catch (e) { /* ignore */ }
+    }
+    return backup;
+  }
+  async function setGithubToken(token) {
+    try { localStorage.setItem(GH_TOKEN_KEY, token); } catch (e) { /* ignore */ }
+    await persistTokenBackup(token);
+  }
+  async function clearGithubToken() {
+    try { localStorage.removeItem(GH_TOKEN_KEY); } catch (e) { /* ignore */ }
+    await clearTokenBackup();
   }
 
   function setAddStatus(msg, isError = false) {
@@ -482,13 +568,17 @@
   // implicit (previously you could only tell by whether the reset button
   // happened to be showing) — this is what actually answers "why is it
   // asking me again", since the answer is always "because no token is
-  // currently saved in this browser".
-  function updateTokenHint() {
-    const hasToken = !!localStorage.getItem(GH_TOKEN_KEY);
+  // currently available (localStorage nor its backup) in this browser".
+  // Also self-heals localStorage from the Cache Storage backup when needed,
+  // and owns the reset-button visibility so there's one source of truth.
+  async function updateTokenHint() {
+    const token = await getGithubToken();
+    const hasToken = !!token;
     els.watchlistTokenHint.textContent = hasToken
       ? "🔑 已儲存 token，點下方按鈕會直接自動加入常駐清單，不會再問一次。"
       : "尚未儲存 token（這台瀏覽器裡沒有）。點下方按鈕加入時，選「儲存並加入」才會存，選「略過，改用複製」不會存。";
     els.watchlistTokenHint.classList.toggle("token-ok", hasToken);
+    els.ghTokenReset.hidden = !hasToken;
   }
 
   function newWatchlistEntry(code) {
@@ -522,7 +612,7 @@
     }
 
     if (currentList && currentList.some((item) => normalizeWatchlistEntry(item).code === code)) {
-      cachedWatchlist = currentList;
+      adoptWatchlistSnapshot(currentList);
       setAddStatus(
         `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次盤前更新` +
         `（平日 08:00）或手動到 Actions 頁面點 Run workflow，跑完之後才會變成離線快取。`
@@ -530,14 +620,14 @@
       return;
     }
 
-    const token = localStorage.getItem(GH_TOKEN_KEY);
+    const token = await getGithubToken();
     if (token && or_) {
       try {
         const entry = newWatchlistEntry(code);
         const newList = currentList ? [...currentList, entry] : [entry];
-        await writeWatchlistViaApi(or_.owner, or_.repo, token, newList, code);
+        await writeWatchlistViaApi(or_.owner, or_.repo, token, newList, `chore: add ${code} to watchlist`);
         setAddStatus(`已把 ${code} 加入常駐清單！下次盤前排程（或手動 Run workflow）跑完就會快取，之後開啟更快、可離線查詢。`);
-        cachedWatchlist = newList; // GitHub's raw-content CDN can lag a few minutes behind a just-made commit; use what we know we just wrote instead of re-fetching immediately.
+        adoptWatchlistSnapshot(newList); // GitHub's raw-content CDN can lag a few minutes behind a just-made commit; use what we know we just wrote instead of re-fetching immediately.
         renderWatchlistCount(newList.length);
         return;
       } catch (e) {
@@ -562,6 +652,67 @@
     els.watchlistTokenForm.dataset.code = code;
   }
 
+  async function copyRemoveFallback(owner, repo, code, newList) {
+    const text = JSON.stringify(newList, null, 2) + "\n";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch { /* clipboard may be unavailable; instructions still shown */ }
+    const editUrl = owner ? `https://github.com/${owner}/${repo}/edit/main/watchlist.json` : "";
+    els.watchlistViewStatus.textContent =
+      `已把移除 ${code} 之後的清單複製到剪貼簿。${editUrl ? "點這裡開啟編輯頁貼上取代全部內容：" + editUrl : "到 GitHub 打開 watchlist.json 貼上取代全部內容。"}`;
+  }
+
+  // Mirrors handleAddToWatchlist but filters the code OUT instead of
+  // appending it. Removing from watchlist.json only stops future scheduled
+  // fetches from touching that stock — it does NOT by itself delete the
+  // already-cached data/stocks/{code}.json, which would otherwise sit there
+  // silently going stale forever and keep getting served as if it were
+  // current. scripts/fetch-data.mjs's cleanupOrphanedStockFiles() deletes
+  // any data/stocks/*.json whose code is no longer in watchlist.json, on the
+  // next scheduled/manual Actions run — same lag as everything else here.
+  async function handleRemoveFromWatchlist(code) {
+    const or_ = parseOwnerRepo();
+    if (!or_) {
+      els.watchlistViewStatus.textContent = "尚未在 config.js 設定 repoUrl，無法自動移除；到 GitHub 手動編輯 watchlist.json 刪除這筆。";
+      return;
+    }
+
+    els.watchlistViewStatus.textContent = `正在移除 ${code}…`;
+
+    let currentList = null;
+    try {
+      currentList = await fetchWatchlistRaw(or_.owner, or_.repo);
+    } catch (e) {
+      els.watchlistViewStatus.textContent = `讀取目前清單失敗（${e.message}），無法安全移除，避免誤刪其他股票，先停在這裡。`;
+      return;
+    }
+
+    const newList = currentList.filter((item) => normalizeWatchlistEntry(item).code !== code);
+    if (newList.length === currentList.length) {
+      els.watchlistViewStatus.textContent = `${code} 已經不在常駐清單裡了。`;
+      adoptWatchlistSnapshot(currentList);
+      return;
+    }
+
+    const token = await getGithubToken();
+    if (token) {
+      try {
+        await writeWatchlistViaApi(or_.owner, or_.repo, token, newList, `chore: remove ${code} from watchlist`);
+        adoptWatchlistSnapshot(newList);
+        renderWatchlistCount(newList.length);
+        await openWatchlistView(); // re-render the list without this entry
+        return;
+      } catch (e) {
+        console.warn("auto-remove failed:", e.message);
+        els.watchlistViewStatus.textContent = `自動移除失敗（${e.message}）。這次先用複製方式：`;
+        await copyRemoveFallback(or_.owner, or_.repo, code, newList);
+        return;
+      }
+    }
+
+    await copyRemoveFallback(or_.owner, or_.repo, code, newList);
+  }
+
   // ---------- watchlist log viewer ----------
 
   async function renderWatchlistCount(knownCount) {
@@ -576,7 +727,7 @@
       // Opportunistically warm cachedWatchlist here too (this already-paid-for
       // fetch runs once at boot) so isInCachedWatchlist() works right away,
       // instead of only after the user has opened the 常駐清單 panel once.
-      if (!cachedWatchlist || list.length > cachedWatchlist.length) cachedWatchlist = list;
+      if (!shouldTrustCachedWatchlist(list)) adoptWatchlistSnapshot(list);
       const count = cachedWatchlist.length;
       els.watchlistViewCount.textContent = `(${count})`;
     } catch { /* ignore */ }
@@ -594,9 +745,9 @@
     }
     try {
       const raw = await fetchWatchlistRaw(or_.owner, or_.repo);
-      const usingCache = cachedWatchlist && cachedWatchlist.length > raw.length;
-      const source = usingCache ? cachedWatchlist : raw;
-      cachedWatchlist = source;
+      const usingCache = shouldTrustCachedWatchlist(raw);
+      if (!usingCache) adoptWatchlistSnapshot(raw);
+      const source = cachedWatchlist;
       const entries = source.map(normalizeWatchlistEntry);
       // most-recently-added first; entries without a timestamp (legacy/manual) sort last, original order preserved among themselves
       const withTime = entries.filter((e) => e.addedAt).sort((a, b) => b.addedAt.localeCompare(a.addedAt));
@@ -604,7 +755,7 @@
       const ordered = [...withTime, ...withoutTime];
 
       els.watchlistViewStatus.textContent = usingCache
-        ? `共 ${entries.length} 檔（剛加入的項目 GitHub 那邊還在同步，可能要等幾分鐘才會出現在 raw 檔案上，但這裡先顯示正確結果）。`
+        ? `共 ${entries.length} 檔（剛剛的新增/移除，GitHub 那邊還在同步，可能要等幾分鐘才會反映在 raw 檔案上，但這裡先顯示正確結果）。`
         : `共 ${entries.length} 檔，資料每日盤前 08:00 自動更新。`;
       els.watchlistViewCount.textContent = `(${entries.length})`;
 
@@ -616,8 +767,16 @@
         const when = entry.addedAt ? new Date(entry.addedAt).toLocaleString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "原始清單";
         const li = document.createElement("li");
         li.innerHTML = `<span class="wv-name">${escapeHtml(name)}</span><span class="wv-code">${entry.code}</span>` +
-          `<div class="wv-meta">${market ? market + " · " : ""}加入時間：${when}</div>`;
-        li.addEventListener("click", () => {
+          `<div class="wv-meta">${market ? market + " · " : ""}加入時間：${when}</div>` +
+          `<button class="wv-remove" data-code="${entry.code}" aria-label="移除">移除</button>`;
+        li.addEventListener("click", (e) => {
+          if (e.target.closest(".wv-remove")) {
+            e.stopPropagation();
+            if (confirm(`確定要把「${name}」(${entry.code}) 從常駐清單移除嗎？`)) {
+              handleRemoveFromWatchlist(entry.code);
+            }
+            return;
+          }
           closeWatchlistView();
           selectStock(entry.code);
         });
@@ -641,11 +800,10 @@
       const token = els.ghTokenInput.value.trim();
       const code = els.watchlistTokenForm.dataset.code;
       if (!token) return;
-      localStorage.setItem(GH_TOKEN_KEY, token);
-      els.ghTokenReset.hidden = false;
+      await setGithubToken(token);
       els.ghTokenInput.value = "";
       els.watchlistTokenForm.hidden = true;
-      updateTokenHint();
+      await updateTokenHint();
       if (code) handleAddToWatchlist(code);
     });
     els.ghTokenSkip.addEventListener("click", async () => {
@@ -660,11 +818,10 @@
     els.watchlistViewClose.addEventListener("click", closeWatchlistView);
     els.favoritesViewBtn.addEventListener("click", openFavoritesView);
     els.favoritesViewClose.addEventListener("click", closeFavoritesView);
-    els.ghTokenReset.addEventListener("click", () => {
-      localStorage.removeItem(GH_TOKEN_KEY);
-      els.ghTokenReset.hidden = true;
-      updateTokenHint();
-      setAddStatus("已清除已存的 token，下次點「加入常駐清單」會重新問你要不要輸入。");
+    els.ghTokenReset.addEventListener("click", async () => {
+      await clearGithubToken();
+      await updateTokenHint();
+      setAddStatus("已清除已存的 token（含備份），下次點「加入常駐清單」會重新問你要不要輸入。");
     });
   }
 
@@ -846,8 +1003,7 @@
         els.watchlistAddBtn.dataset.code = code;
         els.watchlistAddBtn.hidden = false;
         els.watchlistTokenHint.hidden = false;
-        els.ghTokenReset.hidden = !localStorage.getItem(GH_TOKEN_KEY);
-        updateTokenHint();
+        updateTokenHint(); // async; also self-heals localStorage from the Cache Storage backup if needed
       }
     } else {
       els.watchlistAddPanel.hidden = true;

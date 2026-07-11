@@ -232,16 +232,24 @@ async function fetchInstitutional(code) {
     start_date: daysAgoISO(CHIP_HISTORY_DAYS),
     end_date: todayISO(),
   });
+  // FinMind's buy/sell fields here are in 股 (shares), unlike
+  // TaiwanStockMarginPurchaseShortSale which is already in 張 (lots).
+  // Divide by 1000 so this matches every other "張" figure in the app
+  // (confirmed against FinMind's own docs example: 2330's
+  // Foreign_Investor_buy of 31,304,729 is only sane as shares).
+  const toLots = (n) => Math.round(n / 1000);
   return rows
     .map((r) => {
-      const foreign =
+      const foreign = toLots(
         (r.Foreign_Investor_buy || 0) - (r.Foreign_Investor_sell || 0) +
-        (r.Foreign_Dealer_Self_buy || 0) - (r.Foreign_Dealer_Self_sell || 0);
-      const trust = (r.Investment_Trust_buy || 0) - (r.Investment_Trust_sell || 0);
-      const dealer =
+        (r.Foreign_Dealer_Self_buy || 0) - (r.Foreign_Dealer_Self_sell || 0)
+      );
+      const trust = toLots((r.Investment_Trust_buy || 0) - (r.Investment_Trust_sell || 0));
+      const dealer = toLots(
         (r.Dealer_buy || 0) - (r.Dealer_sell || 0) +
         (r.Dealer_self_buy || 0) - (r.Dealer_self_sell || 0) +
-        (r.Dealer_Hedging_buy || 0) - (r.Dealer_Hedging_sell || 0);
+        (r.Dealer_Hedging_buy || 0) - (r.Dealer_Hedging_sell || 0)
+      );
       return { date: r.date, foreign, trust, dealer, total: foreign + trust + dealer };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -305,6 +313,36 @@ async function fetchLending(code) {
 }
 
 // ---------- main ----------
+
+// Removing a stock from watchlist.json only stops future runs from
+// re-fetching it — it doesn't touch the already-written
+// data/stocks/{code}.json, which would otherwise sit there forever getting
+// staler by the day while still being served by the app as if it were
+// current (fetchCached() only checks whether the file exists, it never
+// checks watchlist.json membership). Delete any cached file whose code
+// isn't in the current watchlist so a removed stock actually stops being
+// "cached" instead of quietly going stale.
+async function cleanupOrphanedStockFiles(watchlist) {
+  const keep = new Set(watchlist);
+  let files;
+  try {
+    files = await fs.readdir(STOCKS_DIR);
+  } catch {
+    return; // directory doesn't exist yet (first run) — nothing to clean
+  }
+  const removed = [];
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    const code = file.slice(0, -".json".length);
+    if (!keep.has(code)) {
+      await fs.rm(path.join(STOCKS_DIR, file));
+      removed.push(code);
+    }
+  }
+  if (removed.length) {
+    console.log(`Removed cached data for stocks no longer in watchlist.json: ${removed.join(", ")}`);
+  }
+}
 
 async function fetchStock(code) {
   const price = await fetchPrice(code);
@@ -381,6 +419,8 @@ async function main() {
   if (watchlist.length > 0 && ok.length === 0) {
     process.exitCode = 1;
   }
+
+  await cleanupOrphanedStockFiles(watchlist);
 }
 
 main().catch((e) => {

@@ -7,7 +7,13 @@
 // could get stuck showing an old cached version for a long time.
 //
 // Bump CACHE_VERSION any time you want to force clients to drop old caches.
-const CACHE_VERSION = "tif-v8";
+const CACHE_VERSION = "tif-v10";
+// Separate, deliberately version-independent bucket: app.js stores a backup
+// copy of the GitHub token here (Cache Storage has been observed surviving
+// on iOS Safari when localStorage for this app got cleared — see app.js for
+// the full explanation). This name must never change and must always stay
+// excluded from the cleanup below, or the very next deploy would wipe it.
+const TOKEN_CACHE_NAME = "tif-token-store";
 const APP_SHELL = [
   "./",
   "index.html",
@@ -27,7 +33,9 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)))
+      Promise.all(
+        keys.filter((k) => k !== CACHE_VERSION && k !== TOKEN_CACHE_NAME).map((k) => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
