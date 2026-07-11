@@ -342,7 +342,10 @@ async function main() {
 
   let watchlist = [];
   try {
-    watchlist = JSON.parse(await fs.readFile(path.join(ROOT, "watchlist.json"), "utf-8"));
+    const raw = JSON.parse(await fs.readFile(path.join(ROOT, "watchlist.json"), "utf-8"));
+    // Entries can be plain code strings (manual/original) or {code, name,
+    // addedAt} objects (added from the app's "加入常駐清單" button). Support both.
+    watchlist = raw.map((item) => (typeof item === "string" ? item : item.code)).filter(Boolean);
   } catch (e) {
     console.error("Could not read watchlist.json:", e.message);
     process.exitCode = 1;

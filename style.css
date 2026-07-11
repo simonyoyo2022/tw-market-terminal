@@ -56,6 +56,64 @@ body {
   padding: 14px 16px 12px;
 }
 
+.watchlist-view-btn {
+  margin-top: 10px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.watchlist-view-btn:active { border-color: var(--gold); color: var(--gold); }
+
+.watchlist-view-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--ink);
+  padding: env(safe-area-inset-top) 16px 16px;
+  overflow-y: auto;
+}
+.watchlist-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+}
+.watchlist-view-header h2 { margin: 0; font-size: 18px; color: var(--gold); }
+.watchlist-view-close {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.watchlist-view-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.watchlist-view-list li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+}
+.watchlist-view-list li:active { border-color: var(--gold); }
+.wv-name { font-weight: 700; }
+.wv-code { font-family: var(--mono); color: var(--text-muted); font-size: 12px; margin-left: 6px; }
+.wv-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
 .brand {
   margin: 0 0 10px;
   font-size: 20px;
