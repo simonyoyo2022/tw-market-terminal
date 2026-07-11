@@ -497,8 +497,13 @@
         return;
       } catch (e) {
         console.warn("auto-write failed:", e.message);
-        localStorage.removeItem(GH_TOKEN_KEY);
-        setAddStatus(`自動寫入失敗（${e.message}），已改用複製方式。`, true);
+        const isAuthError = /HTTP 401|HTTP 403/.test(e.message);
+        if (isAuthError) {
+          localStorage.removeItem(GH_TOKEN_KEY);
+          setAddStatus(`Token 似乎沒有權限或已失效（${e.message}），已改用複製方式；下次會再問你要不要重新設定 token。`, true);
+        } else {
+          setAddStatus(`自動寫入失敗（${e.message}），已改用複製方式。Token 還留著，下次會直接重試，不用重貼。`, true);
+        }
         await copyFallback(or_?.owner, or_?.repo, code, currentList);
         return;
       }
