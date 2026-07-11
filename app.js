@@ -29,6 +29,7 @@
     pinBtn: document.getElementById("pin-btn"),
     watchlistAddPanel: document.getElementById("watchlist-add-panel"),
     watchlistAddBtn: document.getElementById("watchlist-add-btn"),
+    watchlistTokenHint: document.getElementById("watchlist-token-hint"),
     watchlistTokenForm: document.getElementById("watchlist-token-form"),
     ghTokenInput: document.getElementById("gh-token-input"),
     ghTokenSave: document.getElementById("gh-token-save"),
@@ -222,15 +223,21 @@
   }
 
   function normalizeInstRows(rows) {
+    // Same unit fix as scripts/fetch-data.mjs: FinMind's institutional
+    // buy/sell fields are in 股 (shares), so divide by 1000 to get 張,
+    // matching every other "張" figure shown in this app.
+    const toLots = (n) => Math.round(n / 1000);
     return rows.map((r) => {
-      const foreign =
+      const foreign = toLots(
         (r.Foreign_Investor_buy || 0) - (r.Foreign_Investor_sell || 0) +
-        (r.Foreign_Dealer_Self_buy || 0) - (r.Foreign_Dealer_Self_sell || 0);
-      const trust = (r.Investment_Trust_buy || 0) - (r.Investment_Trust_sell || 0);
-      const dealer =
+        (r.Foreign_Dealer_Self_buy || 0) - (r.Foreign_Dealer_Self_sell || 0)
+      );
+      const trust = toLots((r.Investment_Trust_buy || 0) - (r.Investment_Trust_sell || 0));
+      const dealer = toLots(
         (r.Dealer_buy || 0) - (r.Dealer_sell || 0) +
         (r.Dealer_self_buy || 0) - (r.Dealer_self_sell || 0) +
-        (r.Dealer_Hedging_buy || 0) - (r.Dealer_Hedging_sell || 0);
+        (r.Dealer_Hedging_buy || 0) - (r.Dealer_Hedging_sell || 0)
+      );
       return { date: r.date, foreign, trust, dealer, total: foreign + trust + dealer };
     }).sort((a, b) => a.date.localeCompare(b.date));
   }
@@ -458,6 +465,19 @@
     els.watchlistAddStatus.style.color = isError ? COLORS.buy : "";
   }
 
+  // Makes the "is a token currently saved?" state visible instead of only
+  // implicit (previously you could only tell by whether the reset button
+  // happened to be showing) — this is what actually answers "why is it
+  // asking me again", since the answer is always "because no token is
+  // currently saved in this browser".
+  function updateTokenHint() {
+    const hasToken = !!localStorage.getItem(GH_TOKEN_KEY);
+    els.watchlistTokenHint.textContent = hasToken
+      ? "🔑 已儲存 token，點下方按鈕會直接自動加入常駐清單，不會再問一次。"
+      : "尚未儲存 token（這台瀏覽器裡沒有）。點下方按鈕加入時，選「儲存並加入」才會存，選「略過，改用複製」不會存。";
+    els.watchlistTokenHint.classList.toggle("token-ok", hasToken);
+  }
+
   function newWatchlistEntry(code) {
     const entry = stockIndex && stockIndex.get(code);
     return { code, name: entry ? entry.name : null, addedAt: new Date().toISOString() };
@@ -604,6 +624,7 @@
       els.ghTokenReset.hidden = false;
       els.ghTokenInput.value = "";
       els.watchlistTokenForm.hidden = true;
+      updateTokenHint();
       if (code) handleAddToWatchlist(code);
     });
     els.ghTokenSkip.addEventListener("click", async () => {
@@ -621,6 +642,7 @@
     els.ghTokenReset.addEventListener("click", () => {
       localStorage.removeItem(GH_TOKEN_KEY);
       els.ghTokenReset.hidden = true;
+      updateTokenHint();
       setAddStatus("已清除已存的 token，下次點「加入常駐清單」會重新問你要不要輸入。");
     });
   }
@@ -788,6 +810,7 @@
       els.watchlistAddBtn.dataset.code = code;
       els.watchlistAddBtn.hidden = false;
       els.ghTokenReset.hidden = !localStorage.getItem(GH_TOKEN_KEY);
+      updateTokenHint();
     } else {
       els.watchlistAddPanel.hidden = true;
     }

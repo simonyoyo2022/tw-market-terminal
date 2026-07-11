@@ -78,13 +78,15 @@
 
     <div id="watchlist-add-panel" class="watchlist-add-panel" hidden>
       <button id="watchlist-add-btn" class="watchlist-add-btn">＋ 加入常駐清單（快取起來，之後開啟更快、可離線）</button>
+      <p id="watchlist-token-hint" class="add-note"></p>
       <div id="watchlist-token-form" class="watchlist-token-form" hidden>
-        <p class="add-note">要自動幫你寫回 GitHub 需要一組 token（fine-grained，僅需這個 repo 的 Contents 讀寫權限），只會存在這台裝置的瀏覽器裡，不會傳到別處。也可以略過，改用複製貼上。</p>
+        <p class="add-note">要自動幫你寫回 GitHub 需要一組 token（fine-grained，僅需這個 repo 的 Contents 讀寫權限），只會存在這台裝置的瀏覽器裡，不會傳到別處。存過一次之後，之後每次加入常駐清單都會自動沿用，不會再問。</p>
         <input id="gh-token-input" type="password" placeholder="貼上 GitHub token" autocomplete="off" spellcheck="false" />
         <div class="watchlist-token-actions">
           <button id="gh-token-save">儲存並加入</button>
           <button id="gh-token-skip">略過，改用複製</button>
         </div>
+        <p class="add-note">「略過，改用複製」不會存 token，這次要手動複製貼上，下次加入別的股票時也還是會再問一次。想一勞永逸的話選左邊「儲存並加入」。</p>
       </div>
       <button id="gh-token-reset" class="gh-token-reset" hidden>清除已存的 token（重新輸入用）</button>
       <p id="watchlist-add-status" class="add-note" hidden></p>
