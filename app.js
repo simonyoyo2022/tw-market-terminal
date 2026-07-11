@@ -54,6 +54,7 @@
       chips: document.getElementById("tab-chips"),
       inst: document.getElementById("tab-inst"),
       lending: document.getElementById("tab-lending"),
+      signal: document.getElementById("tab-signal"),
     },
     emptyState: document.getElementById("empty-state"),
     favoritesList: document.getElementById("favorites-list"),
@@ -65,7 +66,7 @@
   let currentTab = "price";
   let pricePeriod = "daily";
   let cachedWatchlist = null; // most recently known-good watchlist entries (guards against raw.githubusercontent.com's CDN lag after a write)
-  const ranges = { price: 60, chips: 20, inst: 20, lending: 20 };
+  const ranges = { price: 60, chips: 20, inst: 20, lending: 20, signalLookback: 10, marginRatio: 60 };
 
   // ---------- generic helpers ----------
 
@@ -75,6 +76,10 @@
     return sign + Math.round(n).toLocaleString("zh-TW");
   };
   const fmtPrice = (n) => (n == null || Number.isNaN(n) ? "—" : n.toLocaleString("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  // magnitude-only formatter: for use when the sign is already conveyed by
+  // accompanying Chinese wording (賣超/回補/淨增加...), so we don't show a
+  // redundant "+" in front of a number that's already been described as e.g. "賣超".
+  const fmtAbsNum = (n) => (n == null || Number.isNaN(n) ? "—" : Math.round(Math.abs(n)).toLocaleString("zh-TW"));
   const signClass = (n) => (n > 0 ? "is-buy" : n < 0 ? "is-sell" : "is-flat");
   const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -817,6 +822,15 @@
       chips.push({ label: "法人合計(張)", value: fmtNum(lastInst.total), cls: signClass(lastInst.total) });
     }
 
+    const compositePreview = computeComposite(
+      computeInstSignal(payload),
+      computeMarginSignal(payload, ranges.signalLookback || 10, ranges.marginRatio || 60),
+      computeShortSignal(payload, ranges.signalLookback || 10)
+    );
+    if (compositePreview.available) {
+      chips.push({ label: "籌碼訊號", value: compositePreview.shortLabel, cls: compositePreview.cls });
+    }
+
     els.quickStats.innerHTML = chips
       .map(
         (c) =>
@@ -833,6 +847,7 @@
     else if (currentTab === "chips") renderChipsTab();
     else if (currentTab === "inst") renderInstTab();
     else if (currentTab === "lending") renderLendingTab();
+    else if (currentTab === "signal") renderSignalTab();
   }
 
   function sliceRange(rows, n) {
@@ -1003,6 +1018,197 @@
     if (p.lending.length === 0) {
       tbody.innerHTML = `<tr><td colspan="3" class="col-date">此股票近期沒有借券成交紀錄。</td></tr>`;
     }
+  }
+
+  // ---------- 籌碼結構訊號判讀 (rule-based, not a probability model) ----------
+  //
+  // Generalizes the hand-worked single-stock chip-structure writeup into three
+  // reusable, data-backed checks using only what this app actually has:
+  //   1. 法人結構 — is today's institutional net (buy/sell) small & dealer-led
+  //      (mechanical, e.g. warrant-hedging/market-making) or large & led by
+  //      foreign/trust (more likely directional)?
+  //   2. 融資健康度 — weighted-average cost of margin money that entered over
+  //      the lookback window, unrealized loss vs current price, and an
+  //      approximate maintenance ratio / forced-liquidation buffer.
+  //   3. 券資氣氛 — are short sellers (融券) net covering or net adding, and
+  //      what's the recent 借券 (securities lending) volume trend?
+  // Deliberately NOT included: 券商分點進出 and 內外盤比 — this app has no
+  // data source for either (see README), so those two checks always read
+  // "資料不足" here rather than being silently guessed at.
+
+  function toDateCloseMap(priceRows) {
+    const m = new Map();
+    for (const r of priceRows) m.set(r.date, r.close);
+    return m;
+  }
+
+  function scoreCls(score) { return score > 0 ? "is-buy" : score < 0 ? "is-sell" : "is-flat"; }
+
+  function computeInstSignal(payload) {
+    const priceRows = payload.price.daily;
+    const lastPrice = priceRows[priceRows.length - 1];
+    const instRows = payload.institutional;
+    const lastInst = instRows[instRows.length - 1];
+    if (!lastPrice || !lastInst) return { available: false };
+    const volumeLots = Math.round((lastPrice.volume || 0) / 1000);
+    if (!volumeLots) return { available: false };
+
+    const pctOfVolume = (Math.abs(lastInst.total) / volumeLots) * 100;
+    const dealerAbs = Math.abs(lastInst.dealer);
+    const directionalAbs = Math.abs(lastInst.foreign) + Math.abs(lastInst.trust);
+    const dealerDominant = dealerAbs >= directionalAbs;
+
+    let score = 0, label = "買賣互抵", reason =
+      `三大法人今日買賣互抵（合計 ${fmtNum(lastInst.total)} 張），無明顯方向。`;
+
+    if (lastInst.total > 0) {
+      score = 1;
+      label = "法人買超";
+      reason = `三大法人合計買超 ${fmtAbsNum(lastInst.total)} 張，佔當日成交量約 ${pctOfVolume.toFixed(1)}%。`;
+    } else if (lastInst.total < 0) {
+      if (pctOfVolume < 15 && dealerDominant) {
+        score = 1;
+        label = "賣壓偏機制性";
+        reason =
+          `三大法人合計賣超 ${fmtAbsNum(lastInst.total)} 張，僅占當日成交量約 ${pctOfVolume.toFixed(1)}%，` +
+          `且以自營商為主（自營商 ${fmtNum(lastInst.dealer)} 張，外資+投信合計 ${fmtNum(lastInst.foreign + lastInst.trust)} 張），` +
+          `較可能是權證避險／造市等機制性調節，而非外資或投信主動看空出貨。`;
+      } else {
+        score = -1;
+        label = "賣壓偏方向性";
+        reason =
+          `三大法人合計賣超 ${fmtAbsNum(lastInst.total)} 張，占當日成交量約 ${pctOfVolume.toFixed(1)}%` +
+          `${dealerDominant ? "" : "，且以外資／投信為主"}，規模或組成上較像主動調節，需留意。`;
+      }
+    }
+
+    return { available: true, score, label, reason, date: lastInst.date };
+  }
+
+  function computeMarginSignal(payload, lookback, marginRatioPct) {
+    const priceRows = payload.price.daily;
+    const lastPrice = priceRows[priceRows.length - 1];
+    const marginRows = payload.margin.slice(-lookback);
+    if (!lastPrice || !marginRows.length) return { available: false };
+
+    const priceMap = toDateCloseMap(priceRows);
+    let sumChange = 0, sumChangeCost = 0, netChangeAll = 0;
+    for (const r of marginRows) {
+      netChangeAll += r.marginChange || 0;
+      if (r.marginChange > 0) {
+        const close = priceMap.get(r.date);
+        if (close != null) {
+          sumChange += r.marginChange;
+          sumChangeCost += r.marginChange * close;
+        }
+      }
+    }
+    if (sumChange <= 0) return { available: false, netChangeAll };
+
+    const weightedCost = sumChangeCost / sumChange;
+    const currentClose = lastPrice.close;
+    const lossPct = ((currentClose - weightedCost) / weightedCost) * 100;
+    const marginRatio = marginRatioPct / 100;
+    const estMaintenance = (currentClose / weightedCost / marginRatio) * 100;
+
+    let riskLabel, riskScore;
+    if (estMaintenance >= 150) { riskLabel = "斷頭壓力低"; riskScore = 1; }
+    else if (estMaintenance >= 130) { riskLabel = "接近警戒水位"; riskScore = 0; }
+    else { riskLabel = "斷頭壓力高"; riskScore = -1; }
+
+    const balanceTrendTxt = netChangeAll > 0 ? "淨增加" : netChangeAll < 0 ? "淨減少" : "持平";
+    const reason =
+      `近 ${lookback} 個交易日新增融資的加權平均成本約 ${fmtPrice(weightedCost)} 元` +
+      `（用當日收盤價近似估算，非真實成交均價）；對比現價 ${fmtPrice(currentClose)} 元，帳面損益約 ` +
+      `${lossPct > 0 ? "+" : ""}${lossPct.toFixed(1)}%。以融資成數 ${marginRatioPct}% 概算，估計維持率約 ` +
+      `${estMaintenance.toFixed(0)}%。近 ${lookback} 日融資餘額${balanceTrendTxt} ${fmtAbsNum(netChangeAll)} 張。`;
+
+    return { available: true, score: riskScore, label: riskLabel, reason, weightedCost, lossPct, estMaintenance };
+  }
+
+  function computeShortSignal(payload, lookback) {
+    const marginRows = payload.margin.slice(-lookback);
+    if (!marginRows.length) return { available: false };
+    const shortChangeSum = marginRows.reduce((s, r) => s + (r.shortChange || 0), 0);
+    const lendingRows = payload.lending.slice(-lookback);
+    const lastLendingVol = lendingRows.length ? lendingRows[lendingRows.length - 1].volume : null;
+
+    let score = 0, label = "券資持平";
+    if (shortChangeSum < 0) { score = 1; label = "空頭回補為主"; }
+    else if (shortChangeSum > 0) { score = -1; label = "空頭增碼為主"; }
+
+    const reason =
+      `近 ${lookback} 個交易日融券餘額` +
+      `${shortChangeSum < 0 ? "淨減少（回補）" : shortChangeSum > 0 ? "淨增加（加碼放空）" : "持平"} ${fmtAbsNum(shortChangeSum)} 張` +
+      `${lastLendingVol != null ? `；最近一日借券成交量 ${fmtAbsNum(lastLendingVol)} 張` : ""}。`;
+
+    return { available: true, score, label, reason };
+  }
+
+  function computeComposite(instSig, marginSig, shortSig) {
+    const parts = [];
+    if (instSig.available) parts.push(instSig.score);
+    if (marginSig.available) parts.push(marginSig.score);
+    if (shortSig.available) parts.push(shortSig.score);
+    if (!parts.length) return { available: false, count: 0 };
+
+    const sum = parts.reduce((a, b) => a + b, 0);
+    let shortLabel, cls;
+    if (sum >= 2) { shortLabel = "偏多"; cls = "is-buy"; }
+    else if (sum === 1) { shortLabel = "略偏多"; cls = "is-buy"; }
+    else if (sum === 0) { shortLabel = "中性／訊號不一致"; cls = "is-flat"; }
+    else if (sum === -1) { shortLabel = "略偏空"; cls = "is-sell"; }
+    else { shortLabel = "偏空"; cls = "is-sell"; }
+
+    return { available: true, count: parts.length, sum, shortLabel, cls, label: "籌碼訊號" + shortLabel };
+  }
+
+  function signalCard(title, label, cls, reason) {
+    return (
+      `<div class="signal-card">` +
+      `<div class="signal-card-head"><span class="signal-card-title">${title}</span>` +
+      `<span class="signal-card-badge ${cls}">${escapeHtml(label)}</span></div>` +
+      `<p class="signal-card-reason">${reason}</p>` +
+      `</div>`
+    );
+  }
+
+  function renderSignalTab() {
+    const p = currentPayload;
+    const lookback = ranges.signalLookback || 10;
+    const marginRatioPct = ranges.marginRatio || 60;
+
+    const instSig = computeInstSignal(p);
+    const marginSig = computeMarginSignal(p, lookback, marginRatioPct);
+    const shortSig = computeShortSignal(p, lookback);
+    const composite = computeComposite(instSig, marginSig, shortSig);
+
+    const lastInstDate = p.institutional.length ? p.institutional[p.institutional.length - 1].date : "";
+    document.getElementById("signal-verdict").innerHTML = composite.available
+      ? `<div class="ledger-label">綜合判讀（${composite.count}/3 項訊號可用，非機率、非勝率）</div>` +
+        `<div class="ledger-total ${composite.cls}">${composite.label}</div>` +
+        `<div class="ledger-date">${lastInstDate}</div>`
+      : `<div class="ledger-label">綜合判讀</div>` +
+        `<div class="ledger-total is-flat">資料不足</div>` +
+        `<div class="ledger-date">這檔股票近期缺法人／融資／融券資料，無法判讀。</div>`;
+
+    const cards = [
+      instSig.available
+        ? signalCard("法人結構", instSig.label, scoreCls(instSig.score), instSig.reason)
+        : signalCard("法人結構", "資料不足", "is-flat", "近期查無三大法人買賣超或成交量資料。"),
+      marginSig.available
+        ? signalCard("融資健康度", marginSig.label, scoreCls(marginSig.score), marginSig.reason)
+        : signalCard(
+            "融資健康度",
+            "資料不足",
+            "is-flat",
+            `近 ${lookback} 個交易日沒有融資淨增加的交易日，無法估算加權成本；也可能是這檔股票融資交易量本來就很少，或處於不可信用交易狀態。`
+          ),
+      shortSig.available
+        ? signalCard("券資氣氛", shortSig.label, scoreCls(shortSig.score), shortSig.reason)
+        : signalCard("券資氣氛", "資料不足", "is-flat", "近期查無融券或借券資料。"),
+    ];
+    document.getElementById("signal-cards").innerHTML = cards.join("");
   }
 
   // ---------- events ----------

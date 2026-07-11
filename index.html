@@ -97,6 +97,7 @@
       <button class="tab-btn" data-tab="chips">籌碼</button>
       <button class="tab-btn" data-tab="inst">法人</button>
       <button class="tab-btn" data-tab="lending">借券</button>
+      <button class="tab-btn" data-tab="signal">訊號</button>
     </nav>
 
     <!-- 股價 / 技術面 -->
@@ -186,6 +187,40 @@
           <tbody id="lending-tbody"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- 籌碼結構訊號判讀：規則式（rule-based），非機率模型 -->
+    <section id="tab-signal" class="tab-panel">
+      <p class="signal-intro">
+        根據三大法人買賣超結構、融資加權成本／估算維持率、融券與借券變化，做規則式的多空傾向判讀 ——
+        邏輯是「賣壓/買壓是機制性的還是方向性的」「套牢的融資有沒有斷頭壓力」「空方是回補還是加碼」。
+        <strong>不包含券商分點進出與內外盤比</strong>（分點資料需 FinMind 付費會員，內外盤本工具未串接任何來源），
+        這兩項如果對你很關鍵，還是得另外找資料源人工判讀。以下每一項都只是規則式試算，不是機率或勝率，也不構成投資建議。
+      </p>
+
+      <div class="signal-config-label">回看天數（融資成本／券資氣氛估算用）</div>
+      <div class="range-row" data-scope="signalLookback">
+        <button class="range-chip" data-range="5">5 日</button>
+        <button class="range-chip is-active" data-range="10">10 日</button>
+        <button class="range-chip" data-range="20">20 日</button>
+      </div>
+
+      <div class="signal-config-label">融資成數（估算維持率用途，請依個股實際規定調整——注意股／處置股／全額交割股常有調降或停止信用交易的情形）</div>
+      <div class="range-row" data-scope="marginRatio">
+        <button class="range-chip" data-range="50">5 成</button>
+        <button class="range-chip is-active" data-range="60">6 成</button>
+        <button class="range-chip" data-range="70">7 成</button>
+      </div>
+
+      <div id="signal-verdict" class="ledger"></div>
+
+      <div id="signal-cards" class="signal-cards"></div>
+
+      <p class="footnote">
+        三項訊號各自轉成 +1／0／-1 後加總作為方向參考，同號愈多代表訊號愈一致，並非勝率或成功機率。
+        融資維持率估算公式為「（現價 ÷ 估算成本）÷ 融資成數」，成本用「近期融資淨增加當日的收盤價」加權近似，
+        跟券商實際計算（含手續費、利息、真實成交均價）會有落差，僅供概略參考，斷頭／追繳線也因券商而異。
+      </p>
     </section>
 
     <p class="footnote">單位：張（1張＝1,000股）。紅色為增加／買超，綠色為減少／賣超。券商分點買賣超需 FinMind 付費會員，未包含在本工具中。資料來源：FinMind（源自證交所／櫃買中心公開資料），僅供參考，不構成投資建議。</p>

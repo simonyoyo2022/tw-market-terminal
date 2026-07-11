@@ -7,7 +7,7 @@
 // could get stuck showing an old cached version for a long time.
 //
 // Bump CACHE_VERSION any time you want to force clients to drop old caches.
-const CACHE_VERSION = "tif-v3";
+const CACHE_VERSION = "tif-v4";
 const APP_SHELL = [
   "./",
   "index.html",
