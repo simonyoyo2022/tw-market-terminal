@@ -1,0 +1,40 @@
+name: Update market data (evening — margin/lending)
+
+on:
+  schedule:
+    # 21:30 Asia/Taipei (UTC+8) = 13:30 UTC, Monday–Friday. 融資融券/借券 data
+    # tends to post later in the day than price/institutional data.
+    - cron: "30 13 * * 1-5"
+  workflow_dispatch: {} # lets you trigger a manual run from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch evening data from FinMind
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: node scripts/fetch-data.mjs --scope=evening
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "chore: evening data update ($(date -u +%Y-%m-%d))"
+            git push
+          fi
