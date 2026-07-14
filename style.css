@@ -651,6 +651,34 @@ body {
   .ledger-total { font-size: 39px; }
 }
 
+/* Report tab: 每日籌碼結構報告 — reuses .tech-cards/.tech-card/.footnote from
+   elsewhere in this file for the stat grids and disclaimer notes, so only
+   the section wrapper/header need dedicated styles here. */
+.report-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 14px 0 4px;
+}
+.report-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border);
+}
+.report-section:first-of-type { margin-top: 4px; padding-top: 0; border-top: none; }
+.report-h {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold);
+  margin: 0 0 10px;
+}
+.report-section p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  margin: 8px 0;
+}
+.report-section p strong { color: var(--gold); }
+
 /* Signal tab: 籌碼結構訊號判讀 */
 
 .signal-intro {

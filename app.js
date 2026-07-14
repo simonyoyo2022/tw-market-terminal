@@ -64,6 +64,7 @@
       inst: document.getElementById("tab-inst"),
       lending: document.getElementById("tab-lending"),
       signal: document.getElementById("tab-signal"),
+      report: document.getElementById("tab-report"),
     },
     emptyState: document.getElementById("empty-state"),
     favoritesList: document.getElementById("favorites-list"),
@@ -359,16 +360,44 @@
     return { macdLine, signalLine, hist };
   }
 
+  // Taiwan-convention KD (slow stochastic, 2/3-1/3 RSV smoothing, seeded at
+  // 50/50) — must stay identical to kd() in scripts/fetch-data.mjs so live
+  // queries and cached watchlist stocks show the same KD for the same day.
+  function kdSeries(priceDaily, period = 9) {
+    const n = priceDaily.length;
+    const kOut = new Array(n).fill(null);
+    const dOut = new Array(n).fill(null);
+    let prevK = 50, prevD = 50;
+    for (let i = period - 1; i < n; i++) {
+      let hi = -Infinity, lo = Infinity;
+      for (let j = i - period + 1; j <= i; j++) {
+        if (priceDaily[j].max > hi) hi = priceDaily[j].max;
+        if (priceDaily[j].min < lo) lo = priceDaily[j].min;
+      }
+      const close = priceDaily[i].close;
+      const rsv = hi === lo ? 50 : ((close - lo) / (hi - lo)) * 100;
+      const k = prevK * (2 / 3) + rsv * (1 / 3);
+      const d = prevD * (2 / 3) + k * (1 / 3);
+      kOut[i] = k;
+      dOut[i] = d;
+      prevK = k;
+      prevD = d;
+    }
+    return { k: kOut, d: dOut };
+  }
+
   function buildTechnical(priceDaily) {
     const closes = priceDaily.map((r) => r.close);
     const e5 = emaSeries(closes, 5), e20 = emaSeries(closes, 20), e60 = emaSeries(closes, 60);
     const r14 = rsiSeries(closes, 14);
     const { macdLine, signalLine, hist } = macdSeries(closes);
+    const { k: kdK, d: kdD } = kdSeries(priceDaily, 9);
     return priceDaily.map((r, i) => ({
       date: r.date,
       ema5: round2(e5[i]), ema20: round2(e20[i]), ema60: round2(e60[i]),
       rsi14: round2(r14[i]),
       macd: round2(macdLine[i]), macdSignal: round2(signalLine[i]), macdHist: round2(hist[i]),
+      kdK: round2(kdK[i]), kdD: round2(kdD[i]),
     }));
   }
 
@@ -595,7 +624,7 @@
     } catch { /* clipboard may be unavailable; instructions still shown */ }
     const editUrl = owner ? `https://github.com/${owner}/${repo}/edit/main/watchlist.json` : "";
     setAddStatus(
-      `已把完整清單複製到剪貼簿（含 ${code}）。${editUrl ? "點這裡開啟編輯頁貼上取代全部內容：" + editUrl : "到 GitHub 打開 watchlist.json 貼上取代全部內容。"}下次盤前排程跑完就會快取、可離線查詢。`
+      `已把完整清單複製到剪貼簿（含 ${code}）。${editUrl ? "點這裡開啟編輯頁貼上取代全部內容：" + editUrl : "到 GitHub 打開 watchlist.json 貼上取代全部內容。"}下次排程（17:30／21:30）跑完就會快取、可離線查詢。`
     );
   }
 
@@ -614,8 +643,8 @@
     if (currentList && currentList.some((item) => normalizeWatchlistEntry(item).code === code)) {
       adoptWatchlistSnapshot(currentList);
       setAddStatus(
-        `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次盤前更新` +
-        `（平日 08:00）或手動到 Actions 頁面點 Run workflow，跑完之後才會變成離線快取。`
+        `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次排程更新` +
+        `（平日 17:30／21:30）或手動到 Actions 頁面點 Run workflow，跑完之後才會變成離線快取。`
       );
       return;
     }
@@ -626,7 +655,7 @@
         const entry = newWatchlistEntry(code);
         const newList = currentList ? [...currentList, entry] : [entry];
         await writeWatchlistViaApi(or_.owner, or_.repo, token, newList, `chore: add ${code} to watchlist`);
-        setAddStatus(`已把 ${code} 加入常駐清單！下次盤前排程（或手動 Run workflow）跑完就會快取，之後開啟更快、可離線查詢。`);
+        setAddStatus(`已把 ${code} 加入常駐清單！下次排程（17:30／21:30，或手動 Run workflow）跑完就會快取，之後開啟更快、可離線查詢。`);
         adoptWatchlistSnapshot(newList); // GitHub's raw-content CDN can lag a few minutes behind a just-made commit; use what we know we just wrote instead of re-fetching immediately.
         renderWatchlistCount(newList.length);
         return;
@@ -756,7 +785,7 @@
 
       els.watchlistViewStatus.textContent = usingCache
         ? `共 ${entries.length} 檔（剛剛的新增/移除，GitHub 那邊還在同步，可能要等幾分鐘才會反映在 raw 檔案上，但這裡先顯示正確結果）。`
-        : `共 ${entries.length} 檔，資料每日盤前 08:00 自動更新。`;
+        : `共 ${entries.length} 檔，資料每日 17:30／21:30 分兩段自動更新。`;
       els.watchlistViewCount.textContent = `(${entries.length})`;
 
       els.watchlistViewList.innerHTML = "";
@@ -995,8 +1024,8 @@
         els.watchlistTokenHint.hidden = true;
         els.ghTokenReset.hidden = true;
         setAddStatus(
-          `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次盤前更新` +
-          `（平日 08:00）或你自己到 GitHub 專案的 Actions 頁面手動 Run workflow，` +
+          `${code} 已經在常駐清單裡了，只是資料還沒被排程抓進來——要等下次排程更新` +
+          `（平日 17:30／21:30）或你自己到 GitHub 專案的 Actions 頁面手動 Run workflow，` +
           `跑完之後才會變成離線快取。在那之前開啟這檔股票都還是會像現在這樣即時查詢一次。`
         );
       } else {
@@ -1065,6 +1094,7 @@
     else if (currentTab === "inst") renderInstTab();
     else if (currentTab === "lending") renderLendingTab();
     else if (currentTab === "signal") renderSignalTab();
+    else if (currentTab === "report") renderReportTab();
   }
 
   function sliceRange(rows, n) {
@@ -1106,6 +1136,20 @@
             label: "MACD 柱",
             value: lastTech.macdHist ?? "—",
             note: lastTech.macdHist == null ? "" : lastTech.macdHist > 0 ? "偏多" : "偏空",
+          },
+          {
+            label: "KD",
+            value: lastTech.kdK != null ? `K${lastTech.kdK.toFixed(0)} / D${lastTech.kdD.toFixed(0)}` : "—",
+            note:
+              lastTech.kdK == null
+                ? ""
+                : lastTech.kdK >= 80
+                ? "偏超買"
+                : lastTech.kdK <= 20
+                ? "偏超賣"
+                : lastTech.kdK > lastTech.kdD
+                ? "K>D 偏多"
+                : "K<D 偏空",
           },
           {
             label: "均線排列",
@@ -1426,6 +1470,204 @@
         : signalCard("券資氣氛", "資料不足", "is-flat", "近期查無融券或借券資料。"),
     ];
     document.getElementById("signal-cards").innerHTML = cards.join("");
+  }
+
+  // ---------- 每日籌碼結構報告 (report tab) ----------
+  //
+  // Mirrors the section structure of a manually-written single-stock 籌碼分析
+  // writeup, restricted to what's actually computable from this app's data.
+  // Reuses computeInstSignal/computeMarginSignal/computeShortSignal from the
+  // 訊號 tab so the two views never disagree about the same underlying
+  // numbers. Two things are NEVER shown as computed figures, only as an
+  // explicit "做不到" note with the reason: 分點進出 (needs FinMind's paid
+  // TaiwanStockTradingDailyReport) and 內外盤 (needs tick-level order-book
+  // data no source here has). Faking either with a substitute number would
+  // be worse than clearly saying it's unavailable.
+  //
+  // The "三大核心假說" / "明日情境一二三" framing from a typical hand-written
+  // writeup is deliberately NOT reproduced as-is: presenting a forced single
+  // narrative or next-day scenarios (with or without an attached percentage)
+  // is a predictive claim dressed as data, not a report of data. Section 五
+  // lists each available signal's own reading without collapsing them into
+  // one verdict; section 六 lists concrete technical levels to watch instead
+  // of a scenario tree with implied odds.
+
+  function reportVolumeTrend(payload) {
+    const rows = payload.price.daily;
+    if (rows.length < 2) return null;
+    const last = rows[rows.length - 1];
+    const priorRows = rows.slice(0, -1).slice(-5);
+    const lastLots = Math.round((last.volume || 0) / 1000);
+    if (!priorRows.length) return { lastLots, avg5Lots: null, ratioPct: null };
+    const avg5 = priorRows.reduce((s, rr) => s + (rr.volume || 0), 0) / priorRows.length;
+    return { lastLots, avg5Lots: Math.round(avg5 / 1000), ratioPct: avg5 ? (last.volume / avg5) * 100 : null };
+  }
+
+  function reportInstStructure(payload) {
+    const rows = payload.institutional;
+    const last = rows[rows.length - 1];
+    if (!last) return null;
+    const parts = [
+      { name: "外資", value: last.foreign },
+      { name: "投信", value: last.trust },
+      { name: "自營商", value: last.dealer },
+    ];
+    return {
+      date: last.date,
+      total: last.total,
+      sellers: parts.filter((c) => c.value < 0).sort((a, b) => a.value - b.value),
+      buyers: parts.filter((c) => c.value > 0).sort((a, b) => b.value - a.value),
+    };
+  }
+
+  function reportLendingSnapshot(payload, lookback) {
+    const rows = payload.lending.slice(-lookback);
+    if (!rows.length) return null;
+    const last = rows[rows.length - 1];
+    const prior = rows.slice(0, -1);
+    const avgPrior = prior.length ? prior.reduce((s, rr) => s + (rr.volume || 0), 0) / prior.length : null;
+    return { date: last.date, lastVolume: last.volume, avgFeeRate: last.avgFeeRate, avgPriorVolume: avgPrior };
+  }
+
+  function buildDailyReport(payload, lookback, marginRatioPct) {
+    const priceRows = payload.price.daily;
+    const lastPrice = priceRows[priceRows.length - 1];
+    if (!lastPrice) return null;
+    const prevPrice = priceRows[priceRows.length - 2];
+    const chgPct = prevPrice && prevPrice.close ? ((lastPrice.close - prevPrice.close) / prevPrice.close) * 100 : null;
+    const lastMarginRow = payload.margin[payload.margin.length - 1] || null;
+
+    return {
+      date: lastPrice.date,
+      close: lastPrice.close,
+      chgPct,
+      volumeLots: Math.round((lastPrice.volume || 0) / 1000),
+      lastTech: payload.technical[payload.technical.length - 1] || null,
+      volumeTrend: reportVolumeTrend(payload),
+      instStructure: reportInstStructure(payload),
+      instSig: computeInstSignal(payload),
+      marginSig: computeMarginSignal(payload, lookback, marginRatioPct),
+      shortSig: computeShortSignal(payload, lookback),
+      lendingSnap: reportLendingSnapshot(payload, lookback),
+      lastMarginRow,
+      lookback,
+    };
+  }
+
+  function reportSection(title, bodyHtml) {
+    return `<div class="report-section"><h3 class="report-h">${title}</h3>${bodyHtml}</div>`;
+  }
+
+  function renderReportTab() {
+    const p = currentPayload;
+    const lookback = ranges.signalLookback || 10;
+    const marginRatioPct = ranges.marginRatio || 60;
+    const r = buildDailyReport(p, lookback, marginRatioPct);
+    const el = document.getElementById("report-body");
+    if (!r) {
+      el.innerHTML = `<p class="footnote">股價資料不足，無法產生報告。</p>`;
+      return;
+    }
+
+    const chgTxt = r.chgPct != null ? `${r.chgPct > 0 ? "+" : ""}${r.chgPct.toFixed(2)}%` : "—";
+    const chgCls = r.chgPct == null ? "" : signClass(r.chgPct);
+    const t = r.lastTech;
+
+    const sections = [];
+
+    sections.push(
+      reportSection(
+        "一、基本盤勢整理",
+        `<div class="tech-cards">
+          <div class="tech-card"><div class="tc-label">收盤價</div><div class="tc-value">${fmtPrice(r.close)}</div></div>
+          <div class="tech-card"><div class="tc-label">漲跌幅</div><div class="tc-value ${chgCls}">${chgTxt}</div></div>
+          <div class="tech-card"><div class="tc-label">成交量(張)</div><div class="tc-value">${fmtAbsNum(r.volumeLots)}</div></div>
+        </div>
+        <p class="footnote">內外盤（買方/賣方主動成交比）需要逐筆成交揭示（tick-level order book）資料，FinMind 免費版與本工具目前串接的資料源都沒有這項，無法計算，不會用其他欄位湊一個代替數字。</p>`
+      )
+    );
+
+    const volTxt = r.volumeTrend && r.volumeTrend.ratioPct != null
+      ? `${fmtAbsNum(r.volumeTrend.lastLots)}張，近5日均量的${r.volumeTrend.ratioPct.toFixed(0)}%`
+      : "—";
+    sections.push(
+      reportSection(
+        "二、技術線型分析",
+        `<div class="tech-cards">
+          <div class="tech-card"><div class="tc-label">量能</div><div class="tc-value" style="font-size:14px">${volTxt}</div></div>
+          <div class="tech-card"><div class="tc-label">KD</div><div class="tc-value" style="font-size:15px">${t && t.kdK != null ? `K${t.kdK.toFixed(0)}/D${t.kdD.toFixed(0)}` : "—"}</div></div>
+          <div class="tech-card"><div class="tc-label">MACD柱</div><div class="tc-value ${t && t.macdHist != null ? signClass(t.macdHist) : ""}">${t && t.macdHist != null ? t.macdHist : "—"}</div></div>
+          <div class="tech-card"><div class="tc-label">RSI(14)</div><div class="tc-value">${t && t.rsi14 != null ? t.rsi14 : "—"}</div></div>
+        </div>`
+      )
+    );
+
+    sections.push(
+      reportSection(
+        "三、券商分點軌跡",
+        `<p>一、歷史數據：無法取得。</p><p>二、今日事實：無法取得。</p>
+        <p class="footnote">這項需要 FinMind 的 TaiwanStockTradingDailyReport 資料集，限付費 sponsor 會員才能用，本工具沒有串接，無法列出是哪個分點在買/賣。如果這項對你很關鍵，需要另外找有分點資料的來源（例如券商 App）人工比對。</p>`
+      )
+    );
+
+    const fmtParts = (arr) => (arr.length ? arr.map((c) => `${c.name} ${fmtNum(c.value)} 張`).join("、") : "（無）");
+    const structHtml = r.instStructure
+      ? `<p><strong>一、實質賣方結構：</strong>${fmtParts(r.instStructure.sellers)}</p>
+         <p><strong>二、實質買方結構：</strong>${fmtParts(r.instStructure.buyers)}</p>
+         <p class="footnote">三大法人合計 ${fmtNum(r.instStructure.total)} 張。只細到外資/投信/自營商層級，細到哪個券商分點無法取得（見上「券商分點軌跡」）。</p>`
+      : `<p class="footnote">近期查無三大法人資料。</p>`;
+
+    const mBal = r.lastMarginRow ? fmtAbsNum(r.lastMarginRow.marginBalance) + " 張" : "—";
+    const mChg = r.lastMarginRow && r.lastMarginRow.marginChange != null
+      ? r.lastMarginRow.marginChange > 0
+        ? `淨增 ${fmtAbsNum(r.lastMarginRow.marginChange)} 張`
+        : r.lastMarginRow.marginChange < 0
+        ? `淨減 ${fmtAbsNum(r.lastMarginRow.marginChange)} 張`
+        : "持平"
+      : "資料不足";
+    const sBal = r.lastMarginRow ? fmtAbsNum(r.lastMarginRow.shortBalance) + " 張" : "—";
+    const lend = r.lendingSnap;
+    const lendRatio = lend && lend.avgPriorVolume ? `，約為近期日均量(${fmtAbsNum(lend.avgPriorVolume)}張)的 ${((lend.lastVolume / lend.avgPriorVolume) * 100).toFixed(0)}%` : "";
+
+    const marginLendingHtml = `
+      <p><strong>三、融資 &amp; 借券數據：</strong></p>
+      <p>融資：今日累計餘額 ${mBal}，單日${mChg}。${r.marginSig.available ? r.marginSig.reason : `近 ${lookback} 個交易日沒有融資淨增加的交易日，無法估算加權成本區。`}</p>
+      <p>融券：今日累計餘額 ${sBal}。${r.shortSig.available ? r.shortSig.reason : "近期查無融券資料。"}</p>
+      <p>借券：${lend ? `最近一日新成交 ${fmtAbsNum(lend.lastVolume)} 張${lend.avgFeeRate != null ? `，平均費率 ${lend.avgFeeRate}%` : ""}${lendRatio}。` : "近期查無借券資料。"}
+      <span class="footnote">這個資料集只有「當日新成交的借券量」，沒有拆「借券賣出」vs「借券返還」，也沒有成交價格，<strong>無法算出借券的加權平均成本區</strong>，硬湊一個數字出來會是假的，這裡不做。</span></p>
+    `;
+
+    sections.push(reportSection(`四、數據總整理（結合三大法人，回看 ${lookback} 日）`, structHtml + marginLendingHtml));
+
+    const obs = [r.instSig, r.marginSig, r.shortSig].filter((s) => s.available);
+    const obsHtml = obs.length
+      ? obs.map((s, i) => `<p><strong>觀察 ${i + 1}（${s.label}）：</strong>${s.reason}</p>`).join("")
+      : `<p class="footnote">目前可用的訊號不足，無法整理觀察。</p>`;
+    sections.push(
+      reportSection(
+        "五、今日數據觀察",
+        obsHtml +
+          `<p class="footnote">以上是把上面的原始數據拆開來看、各自的解讀方向，不是收斂成單一結論的「假說」，也不是機率或勝率——同一批數據常常同時支持不只一種解讀，這裡刻意不幫你選定「正確答案」，留給你自己判斷。</p>`
+      )
+    );
+
+    const levels = [];
+    if (t) {
+      if (t.ema5 != null) levels.push(`EMA5 ${fmtPrice(t.ema5)}`);
+      if (t.ema20 != null) levels.push(`EMA20 ${fmtPrice(t.ema20)}`);
+      if (t.ema60 != null) levels.push(`EMA60 ${fmtPrice(t.ema60)}`);
+    }
+    sections.push(
+      reportSection(
+        "六、後續關注重點",
+        `<p>可對照的均線位階：${levels.length ? levels.join("、") : "資料不足"}。</p>
+        <p class="footnote">這裡不做「明日情境一/二/三」式的走勢預測——不管包裝成百分比機率還是別的，對單一交易日的方向做具體推演都超出「純數據整理」能給的確定性。上面列出的是接下來可以拿現價去對照的既有技術位階，站上/跌破分別代表什麼，由你自己依經驗判斷，這不是投資建議。</p>`
+      )
+    );
+
+    el.innerHTML =
+      `<div class="report-meta">${r.date} 收盤後純數據整理，僅供參考，不構成投資建議。回看天數／融資成數可以到「訊號」分頁調整。</div>` +
+      sections.join("");
   }
 
   // ---------- events ----------
