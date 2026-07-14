@@ -73,6 +73,7 @@
   let stockList = [];
   let stockIndex = null;
   let currentPayload = null;
+  let currentCode = null;
   let currentTab = "price";
   let pricePeriod = "daily";
   let cachedWatchlist = null; // most recently known-good watchlist entries (guards against raw.githubusercontent.com's CDN lag after a write)
@@ -885,6 +886,7 @@
 
     setStatus(payload.live ? "即時查詢結果（未快取，關閉後要再重查；點下方按鈕可加入常駐清單，之後就能離線快速讀取）" : "");
     currentPayload = payload;
+    currentCode = code;
     renderStock(code, payload);
   }
 
@@ -1558,6 +1560,62 @@
     return `<div class="report-section"><h3 class="report-h">${title}</h3>${bodyHtml}</div>`;
   }
 
+  // ---------- 分點分析請求（對話式 workaround） ----------
+  //
+  // Broker-branch (分點) data is Sponsor-tier on FinMind (verified against
+  // finmind.github.io/llms-full.txt: TaiwanStockTradingDailyReport — Tier:
+  // Sponsor) and the official TWSE/TPEx query pages are CAPTCHA-gated, so
+  // this app cannot fetch it automatically. The workaround: package every
+  // number this app DOES have into a structured analysis request, which the
+  // user copies into a Claude conversation together with screenshots of the
+  // 分點 page (from the official query system or their broker app). Claude
+  // reads the screenshots + these numbers and does the cross-referenced
+  // chip-structure analysis that this static app can't.
+
+  function officialBranchReportUrl(market) {
+    // Both are the authoritative sources every third-party 分點 site rescrapes.
+    return market === "上櫃" || market === "tpex"
+      ? "https://www.tpex.org.tw/web/stock/aftertrading/broker_trading/brokerBS.php?l=zh-tw"
+      : "https://bsr.twse.com.tw/bshtm/";
+  }
+
+  function buildClaudeBranchPrompt(code, payload, report, stockName, market) {
+    const r = report;
+    const t = r.lastTech;
+    const inst = r.instStructure;
+    const m = r.lastMarginRow;
+    const lines = [];
+
+    lines.push(`請幫我做 ${stockName}(${code}) ${r.date} 的券商分點籌碼結構分析。`);
+    lines.push("");
+    lines.push("我會附上當日券商分點買賣明細的截圖（來自證交所/櫃買中心買賣日報表查詢系統或券商App），請先把截圖裡的分點數據讀出來，再跟下面我的 App 已經算好的數據交叉比對。");
+    lines.push("");
+    lines.push("=== 我的 App 已有的數據（單位：張） ===");
+    lines.push(`收盤 ${fmtPrice(r.close)} 元（${r.chgPct != null ? (r.chgPct > 0 ? "+" : "") + r.chgPct.toFixed(2) + "%" : "—"}），成交量 ${fmtAbsNum(r.volumeLots)} 張` +
+      (r.volumeTrend && r.volumeTrend.ratioPct != null ? `（近5日均量的 ${r.volumeTrend.ratioPct.toFixed(0)}%）` : ""));
+    if (inst) {
+      lines.push(`三大法人：外資 ${fmtNum(payload.institutional[payload.institutional.length - 1].foreign)}、投信 ${fmtNum(payload.institutional[payload.institutional.length - 1].trust)}、自營商 ${fmtNum(payload.institutional[payload.institutional.length - 1].dealer)}，合計 ${fmtNum(inst.total)}`);
+    }
+    if (m) {
+      lines.push(`融資餘額 ${fmtAbsNum(m.marginBalance)} 張（單日${m.marginChange > 0 ? "淨增 " + fmtAbsNum(m.marginChange) : m.marginChange < 0 ? "淨減 " + fmtAbsNum(m.marginChange) : "持平"}張）；融券餘額 ${fmtAbsNum(m.shortBalance)} 張`);
+    }
+    if (r.marginSig.available) lines.push(`融資估算：${r.marginSig.reason}`);
+    if (r.shortSig.available) lines.push(`券資：${r.shortSig.reason}`);
+    if (r.lendingSnap) lines.push(`借券：最近一日新成交 ${fmtAbsNum(r.lendingSnap.lastVolume)} 張${r.lendingSnap.avgFeeRate != null ? `，平均費率 ${r.lendingSnap.avgFeeRate}%` : ""}`);
+    if (t) {
+      lines.push(`技術面：EMA5 ${fmtPrice(t.ema5)}／EMA20 ${fmtPrice(t.ema20)}／EMA60 ${fmtPrice(t.ema60)}，RSI14 ${t.rsi14 ?? "—"}，MACD柱 ${t.macdHist ?? "—"}，KD K${t.kdK != null ? t.kdK.toFixed(0) : "—"}/D${t.kdD != null ? t.kdD.toFixed(0) : "—"}`);
+    }
+    lines.push("");
+    lines.push("=== 請分析 ===");
+    lines.push("1. 從截圖整理主要賣超分點與買超分點（名稱、張數、均價），有歷史背景的分點（例如權證發行商避險分點、外資指標分點）請標註。");
+    lines.push("2. 交叉比對：分點賣壓跟三大法人數據對不對得起來？賣壓是機制性（造市/避險）還是方向性？");
+    lines.push("3. 買方結構：主要承接分點的買超均價落在哪個區間，跟均線位階的關係。");
+    lines.push("4. 結合融資融券與借券數據，說明多空雙方的結構。");
+    lines.push("5. 只根據數據講得出來的部分，講不出來的請直說做不到，不要腦補。");
+
+    return lines.join("\n");
+  }
+
   function renderReportTab() {
     const p = currentPayload;
     const lookback = ranges.signalLookback || 10;
@@ -1602,11 +1660,17 @@
       )
     );
 
+    const entry = (stockIndex && stockIndex.get(currentCode)) || { name: currentCode, market: "" };
+    const bsrUrl = officialBranchReportUrl(entry.market);
     sections.push(
       reportSection(
         "三、券商分點軌跡",
-        `<p>一、歷史數據：無法取得。</p><p>二、今日事實：無法取得。</p>
-        <p class="footnote">這項需要 FinMind 的 TaiwanStockTradingDailyReport 資料集，限付費 sponsor 會員才能用，本工具沒有串接，無法列出是哪個分點在買/賣。如果這項對你很關鍵，需要另外找有分點資料的來源（例如券商 App）人工比對。</p>`
+        `<p>自動抓取做不到（FinMind 這個資料集是付費 Sponsor 限定，官方查詢系統有驗證碼擋自動化），但可以改用「對話式」半自動：</p>
+        <p>1. 到<a href="${bsrUrl}" target="_blank" rel="noopener">官方買賣日報表查詢系統（${entry.market === "上櫃" ? "櫃買中心" : "證交所"}）</a>查 ${currentCode} 當日分點明細，截圖存下來（或用你券商 App 的分點頁截圖）。</p>
+        <p>2. 點下面按鈕，會把這檔股票今天所有已知數據打包成一段分析請求、複製到剪貼簿。</p>
+        <p>3. 打開 Claude，貼上文字 + 附上截圖，Claude 會讀出分點數據並跟本 App 的法人/融資/借券數據交叉分析。</p>
+        <button id="report-copy-prompt" class="watchlist-add-btn" style="margin-top:6px">📋 複製分點分析請求（附截圖給 Claude 用）</button>
+        <p id="report-copy-status" class="footnote" hidden></p>`
       )
     );
 
@@ -1668,6 +1732,27 @@
     el.innerHTML =
       `<div class="report-meta">${r.date} 收盤後純數據整理，僅供參考，不構成投資建議。回看天數／融資成數可以到「訊號」分頁調整。</div>` +
       sections.join("");
+
+    const copyBtn = document.getElementById("report-copy-prompt");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        const promptText = buildClaudeBranchPrompt(currentCode, p, r, entry.name || currentCode, entry.market);
+        const statusEl = document.getElementById("report-copy-status");
+        try {
+          await navigator.clipboard.writeText(promptText);
+          statusEl.textContent = "已複製！打開 Claude，貼上這段文字並附上分點截圖即可。";
+        } catch {
+          // iOS clipboard can fail outside a user gesture or in odd contexts;
+          // fall back to showing the text so it can be selected manually.
+          statusEl.textContent = "自動複製失敗，請手動長按選取下面文字複製：";
+          const pre = document.createElement("pre");
+          pre.style.cssText = "white-space:pre-wrap;font-size:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;user-select:all;-webkit-user-select:all;";
+          pre.textContent = promptText;
+          statusEl.after(pre);
+        }
+        statusEl.hidden = false;
+      });
+    }
   }
 
   // ---------- events ----------
