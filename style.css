@@ -761,3 +761,16 @@ body {
   font-size: 16px;
 }
 .favorites-list li:active { border-color: var(--gold); }
+
+/* 手動補資料連結（報告分頁第三節） */
+.manual-links {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.manual-links li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+.manual-links .footnote {
+  display: block;
+}

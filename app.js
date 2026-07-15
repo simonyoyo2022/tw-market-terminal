@@ -286,14 +286,30 @@
   function normalizeValuationRows(rows) {
     return rows.map((r) => ({ date: r.date, per: r.PER, pbr: r.PBR, dividendYield: r.dividend_yield })).sort((a, b) => a.date.localeCompare(b.date));
   }
+  // 每日增減一律用「今日餘額 − 昨日餘額」推導（資料源兩個欄位都有），
+  // 流量欄位（買/賣/現償）只當缺 YesterdayBalance 時的備援。
+  // 理由：融券餘額還會被停券、強制回補、額度調整等機制性事件改動，
+  // 只加總流量欄位會跟顯示的餘額對不上帳（曾出現「近10日淨增9張」
+  // 但「餘額0張」的矛盾）。餘額差推導讓這種矛盾在數學上不可能發生。
+  function balanceDiffChange(today, yesterday, flowFallback) {
+    return today != null && yesterday != null ? today - yesterday : flowFallback;
+  }
   function normalizeMarginRows(rows) {
     return rows
       .map((r) => ({
         date: r.date,
         marginBalance: r.MarginPurchaseTodayBalance,
-        marginChange: (r.MarginPurchaseBuy || 0) - (r.MarginPurchaseSell || 0) - (r.MarginPurchaseCashRepayment || 0),
+        marginChange: balanceDiffChange(
+          r.MarginPurchaseTodayBalance,
+          r.MarginPurchaseYesterdayBalance,
+          (r.MarginPurchaseBuy || 0) - (r.MarginPurchaseSell || 0) - (r.MarginPurchaseCashRepayment || 0)
+        ),
         shortBalance: r.ShortSaleTodayBalance,
-        shortChange: (r.ShortSaleSell || 0) - (r.ShortSaleBuy || 0) - (r.ShortSaleCashRepayment || 0),
+        shortChange: balanceDiffChange(
+          r.ShortSaleTodayBalance,
+          r.ShortSaleYesterdayBalance,
+          (r.ShortSaleSell || 0) - (r.ShortSaleBuy || 0) - (r.ShortSaleCashRepayment || 0)
+        ),
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }
@@ -1267,6 +1283,26 @@
     const rows = sliceRange(p.lending, ranges.lending);
     renderBars(document.getElementById("lending-chart"), rows, (r) => r.volume, COLORS.gold);
 
+    // 融券借券賣出餘額（官方快照逐日累積，只有常駐清單股票才有）
+    const sblEl = document.getElementById("lending-sbl-summary");
+    if (sblEl) {
+      const sblRows = (p.sbl || []).filter((r) => r.balance != null);
+      if (sblRows.length) {
+        const last = sblRows[sblRows.length - 1];
+        const first = sblRows[0];
+        const net = last.balance - first.balance;
+        const netTxt = sblRows.length > 1
+          ? `，自 ${first.date} 累積以來${net > 0 ? "淨增 " : net < 0 ? "淨減 " : "持平 "}${fmtAbsNum(net)} 張（已累積 ${sblRows.length} 個交易日）`
+          : "（快照才剛開始累積，趨勢要等幾天後才看得出來）";
+        sblEl.textContent =
+          `借券賣出餘額：${fmtAbsNum(last.balance)} 張（${last.date}）${netTxt}` +
+          (p.sblUnitDivisor ? "" : "【單位未校正，首次啟用請對照官方頁核對數字】");
+        sblEl.hidden = false;
+      } else {
+        sblEl.hidden = true;
+      }
+    }
+
     const tbody = document.getElementById("lending-tbody");
     tbody.innerHTML = "";
     for (let i = rows.length - 1; i >= 0; i--) {
@@ -1306,6 +1342,20 @@
   }
 
   function scoreCls(score) { return score > 0 ? "is-buy" : score < 0 ? "is-sell" : "is-flat"; }
+
+  // 近 N 日淨增減 = 窗口最後一列餘額 − 窗口起點前的基準餘額。
+  // 保證跟畫面上顯示的「餘額」永遠自洽（不會再出現餘額 0 卻淨增 9 張）。
+  function windowNetFromBalance(series, lookback, balanceKey, changeKey) {
+    if (!series.length) return 0;
+    const rows = series.slice(-lookback);
+    const last = rows[rows.length - 1];
+    const beforeIdx = series.length - rows.length - 1;
+    const baseline = beforeIdx >= 0
+      ? series[beforeIdx][balanceKey]
+      : rows[0][balanceKey] - (rows[0][changeKey] || 0);
+    if (last[balanceKey] == null || baseline == null) return 0;
+    return last[balanceKey] - baseline;
+  }
 
   function computeInstSignal(payload) {
     const priceRows = payload.price.daily;
@@ -1355,9 +1405,11 @@
     if (!lastPrice || !marginRows.length) return { available: false };
 
     const priceMap = toDateCloseMap(priceRows);
-    let sumChange = 0, sumChangeCost = 0, netChangeAll = 0;
+    // 窗口淨增減用「首尾餘額差」而非逐日變動加總：
+    // 基準 = 窗口前一列的餘額；窗口涵蓋整個序列時，用第一列餘額減其當日變動回推。
+    const netChangeAll = windowNetFromBalance(payload.margin, lookback, "marginBalance", "marginChange");
+    let sumChange = 0, sumChangeCost = 0;
     for (const r of marginRows) {
-      netChangeAll += r.marginChange || 0;
       if (r.marginChange > 0) {
         const close = priceMap.get(r.date);
         if (close != null) {
@@ -1391,21 +1443,47 @@
 
   function computeShortSignal(payload, lookback) {
     const marginRows = payload.margin.slice(-lookback);
-    if (!marginRows.length) return { available: false };
-    const shortChangeSum = marginRows.reduce((s, r) => s + (r.shortChange || 0), 0);
+    const sblRows = (payload.sbl || []).filter((r) => r.balance != null);
+    if (!marginRows.length && !sblRows.length) return { available: false };
+
+    const shortNet = marginRows.length
+      ? windowNetFromBalance(payload.margin, lookback, "shortBalance", "shortChange")
+      : null;
+    // sbl rows carry no per-day change field; windowNetFromBalance's fallback
+    // baseline (first row's balance) makes this a clean first-vs-last diff.
+    const sblNet = sblRows.length
+      ? windowNetFromBalance(sblRows, lookback, "balance", "change")
+      : null;
+    const sblLast = sblRows.length ? sblRows[sblRows.length - 1] : null;
+    const sblUnitOk = !!payload.sblUnitDivisor;
+
     const lendingRows = payload.lending.slice(-lookback);
     const lastLendingVol = lendingRows.length ? lendingRows[lendingRows.length - 1].volume : null;
 
+    // 合併淨變化：融券 + 借券賣出餘額都是「還在場上的空方部位」，同單位(張)可相加。
+    // 借券單位未校正時不納入評分，只在文字中揭露並標註未驗證。
+    const combinedNet = (shortNet || 0) + (sblNet != null && sblUnitOk ? sblNet : 0);
     let score = 0, label = "券資持平";
-    if (shortChangeSum < 0) { score = 1; label = "空頭回補為主"; }
-    else if (shortChangeSum > 0) { score = -1; label = "空頭增碼為主"; }
+    if (combinedNet < 0) { score = 1; label = "空頭回補為主"; }
+    else if (combinedNet > 0) { score = -1; label = "空頭增碼為主"; }
 
-    const reason =
-      `近 ${lookback} 個交易日融券餘額` +
-      `${shortChangeSum < 0 ? "淨減少（回補）" : shortChangeSum > 0 ? "淨增加（加碼放空）" : "持平"} ${fmtAbsNum(shortChangeSum)} 張` +
-      `${lastLendingVol != null ? `；最近一日借券成交量 ${fmtAbsNum(lastLendingVol)} 張` : ""}。`;
+    const parts = [];
+    if (shortNet != null) {
+      parts.push(
+        `融券餘額${shortNet < 0 ? "淨減少（回補）" : shortNet > 0 ? "淨增加（加碼放空）" : "持平"} ${fmtAbsNum(shortNet)} 張`
+      );
+    }
+    if (sblLast != null) {
+      parts.push(
+        `借券賣出餘額 ${fmtAbsNum(sblLast.balance)} 張（${sblLast.date}）` +
+        (sblNet != null ? `，區間${sblNet < 0 ? "淨減 " : sblNet > 0 ? "淨增 " : "持平 "}${fmtAbsNum(sblNet)} 張` : "") +
+        (sblUnitOk ? "" : "【單位未校正，僅供參考】")
+      );
+    }
+    if (lastLendingVol != null) parts.push(`最近一日借券成交量 ${fmtAbsNum(lastLendingVol)} 張`);
+    const reason = `近 ${lookback} 個交易日：` + parts.join("；") + "。";
 
-    return { available: true, score, label, reason };
+    return { available: true, score, label, reason, shortNet, sblNet, sblLast };
   }
 
   function computeComposite(instSig, marginSig, shortSig) {
@@ -1531,6 +1609,19 @@
     return { date: last.date, lastVolume: last.volume, avgFeeRate: last.avgFeeRate, avgPriorVolume: avgPrior };
   }
 
+  function reportSblSnapshot(payload, lookback) {
+    const rows = (payload.sbl || []).filter((r) => r.balance != null).slice(-lookback);
+    if (!rows.length) return null;
+    const last = rows[rows.length - 1];
+    return {
+      date: last.date,
+      balance: last.balance,
+      net: rows.length > 1 ? last.balance - rows[0].balance : null,
+      days: rows.length,
+      unitVerified: !!payload.sblUnitDivisor,
+    };
+  }
+
   function buildDailyReport(payload, lookback, marginRatioPct) {
     const priceRows = payload.price.daily;
     const lastPrice = priceRows[priceRows.length - 1];
@@ -1551,6 +1642,7 @@
       marginSig: computeMarginSignal(payload, lookback, marginRatioPct),
       shortSig: computeShortSignal(payload, lookback),
       lendingSnap: reportLendingSnapshot(payload, lookback),
+      sblSnap: reportSblSnapshot(payload, lookback),
       lastMarginRow,
       lookback,
     };
@@ -1579,6 +1671,30 @@
       : "https://bsr.twse.com.tw/bshtm/";
   }
 
+  // 本 App 抓不到、需要人工查了再貼給 Claude 的三類資料，各附查詢入口。
+  // 連結對應「資料缺口」而非「資料集」：每一條都寫清楚能補什麼、有什麼限制。
+  function manualDataLinksHtml(code, market) {
+    const isTpex = market === "上櫃";
+    const yahooUrl = `https://tw.stock.yahoo.com/quote/${code}${isTpex ? ".TWO" : ".TW"}`;
+    const sblUrl = isTpex
+      ? "https://www.tpex.org.tw/openapi/v1/tpex_margin_sbl"
+      : "https://www.twse.com.tw/zh/products/sbl/disclosures/t13sa710.html";
+    const sblLabel = isTpex
+      ? "櫃買 OpenAPI：上櫃融券借券賣出餘額（JSON，搜尋股號即可）"
+      : "證交所：歷史借券成交明細（可選日期區間）";
+    return (
+      `<p><strong>本 App 做不到、可手動查了補給 Claude 的資料：</strong></p>
+      <ul class="manual-links">
+        <li>內外盤比：<a href="${yahooUrl}" target="_blank" rel="noopener">Yahoo股市 ${code} 個股頁</a>
+          <span class="footnote">只有「當日」看得到，收盤後隔天就查不回來，要當天截圖。</span></li>
+        <li>借券明細：<a href="${sblUrl}" target="_blank" rel="noopener">${sblLabel}</a>
+          <span class="footnote">借券賣出「餘額」已內建（借券分頁），此連結留作首次啟用時核對單位用。「哪個分點借的、賣在哪個價位」沒有任何公開來源，查不到是正常的。</span></li>
+        <li>分點歷史背景（權證避險/外資指標分點的長期底倉）：沒有官方來源，
+          需用你的券商 App 或第三方籌碼平台查該分點的歷史區間買賣，截圖附給 Claude。</li>
+      </ul>`
+    );
+  }
+
   function buildClaudeBranchPrompt(code, payload, report, stockName, market) {
     const r = report;
     const t = r.lastTech;
@@ -1588,7 +1704,8 @@
 
     lines.push(`請幫我做 ${stockName}(${code}) ${r.date} 的券商分點籌碼結構分析。`);
     lines.push("");
-    lines.push("我會附上當日券商分點買賣明細的截圖（來自證交所/櫃買中心買賣日報表查詢系統或券商App），請先把截圖裡的分點數據讀出來，再跟下面我的 App 已經算好的數據交叉比對。");
+    lines.push("我會附上當日券商分點買賣明細的截圖或CSV（來自證交所/櫃買中心買賣日報表查詢系統或券商App），請先把裡面的分點數據讀出來，再跟下面我的 App 已經算好的數據交叉比對。");
+    lines.push("如有另外附上：內外盤比截圖（Yahoo股市當日）、借券明細截圖、特定分點的歷史買賣區間截圖，也請一併納入分析；沒附的部分照舊直說做不到。");
     lines.push("");
     lines.push("=== 我的 App 已有的數據（單位：張） ===");
     lines.push(`收盤 ${fmtPrice(r.close)} 元（${r.chgPct != null ? (r.chgPct > 0 ? "+" : "") + r.chgPct.toFixed(2) + "%" : "—"}），成交量 ${fmtAbsNum(r.volumeLots)} 張` +
@@ -1602,6 +1719,13 @@
     if (r.marginSig.available) lines.push(`融資估算：${r.marginSig.reason}`);
     if (r.shortSig.available) lines.push(`券資：${r.shortSig.reason}`);
     if (r.lendingSnap) lines.push(`借券：最近一日新成交 ${fmtAbsNum(r.lendingSnap.lastVolume)} 張${r.lendingSnap.avgFeeRate != null ? `，平均費率 ${r.lendingSnap.avgFeeRate}%` : ""}`);
+    if (r.sblSnap) {
+      lines.push(
+        `借券賣出餘額：${fmtAbsNum(r.sblSnap.balance)} 張（${r.sblSnap.date}，官方快照）` +
+        (r.sblSnap.net != null ? `；快照累積 ${r.sblSnap.days} 個交易日${r.sblSnap.net > 0 ? "淨增 " : r.sblSnap.net < 0 ? "淨減 " : "持平 "}${fmtAbsNum(r.sblSnap.net)} 張` : "") +
+        (r.sblSnap.unitVerified ? "" : "（單位未校正，數字僅供參考）")
+      );
+    }
     if (t) {
       lines.push(`技術面：EMA5 ${fmtPrice(t.ema5)}／EMA20 ${fmtPrice(t.ema20)}／EMA60 ${fmtPrice(t.ema60)}，RSI14 ${t.rsi14 ?? "—"}，MACD柱 ${t.macdHist ?? "—"}，KD K${t.kdK != null ? t.kdK.toFixed(0) : "—"}/D${t.kdD != null ? t.kdD.toFixed(0) : "—"}`);
     }
@@ -1670,7 +1794,8 @@
         <p>2. 點下面按鈕，會把這檔股票今天所有已知數據打包成一段分析請求、複製到剪貼簿。</p>
         <p>3. 打開 Claude，貼上文字 + 附上截圖，Claude 會讀出分點數據並跟本 App 的法人/融資/借券數據交叉分析。</p>
         <button id="report-copy-prompt" class="watchlist-add-btn" style="margin-top:6px">📋 複製分點分析請求（附截圖給 Claude 用）</button>
-        <p id="report-copy-status" class="footnote" hidden></p>`
+        <p id="report-copy-status" class="footnote" hidden></p>
+        ${manualDataLinksHtml(currentCode, entry.market)}`
       )
     );
 
@@ -1693,12 +1818,19 @@
     const lend = r.lendingSnap;
     const lendRatio = lend && lend.avgPriorVolume ? `，約為近期日均量(${fmtAbsNum(lend.avgPriorVolume)}張)的 ${((lend.lastVolume / lend.avgPriorVolume) * 100).toFixed(0)}%` : "";
 
+    const sblLine = r.sblSnap
+      ? `借券賣出餘額 ${fmtAbsNum(r.sblSnap.balance)} 張（${r.sblSnap.date}）` +
+        (r.sblSnap.net != null
+          ? `，快照累積 ${r.sblSnap.days} 日${r.sblSnap.net > 0 ? "淨增 " : r.sblSnap.net < 0 ? "淨減 " : "持平 "}${fmtAbsNum(r.sblSnap.net)} 張`
+          : "（快照剛開始累積）") +
+        (r.sblSnap.unitVerified ? "" : "【單位未校正】") + "。"
+      : "";
     const marginLendingHtml = `
       <p><strong>三、融資 &amp; 借券數據：</strong></p>
       <p>融資：今日累計餘額 ${mBal}，單日${mChg}。${r.marginSig.available ? r.marginSig.reason : `近 ${lookback} 個交易日沒有融資淨增加的交易日，無法估算加權成本區。`}</p>
       <p>融券：今日累計餘額 ${sBal}。${r.shortSig.available ? r.shortSig.reason : "近期查無融券資料。"}</p>
-      <p>借券：${lend ? `最近一日新成交 ${fmtAbsNum(lend.lastVolume)} 張${lend.avgFeeRate != null ? `，平均費率 ${lend.avgFeeRate}%` : ""}${lendRatio}。` : "近期查無借券資料。"}
-      <span class="footnote">這個資料集只有「當日新成交的借券量」，沒有拆「借券賣出」vs「借券返還」，也沒有成交價格，<strong>無法算出借券的加權平均成本區</strong>，硬湊一個數字出來會是假的，這裡不做。</span></p>
+      <p>借券：${lend ? `最近一日新成交 ${fmtAbsNum(lend.lastVolume)} 張${lend.avgFeeRate != null ? `，平均費率 ${lend.avgFeeRate}%` : ""}${lendRatio}。` : "近期查無借券成交資料。"}${sblLine}
+      <span class="footnote">借券成交量不拆「借券賣出」vs「返還」也沒有成交價格，<strong>無法算出借券的加權平均成本區</strong>，硬湊一個數字出來會是假的，這裡不做。借券賣出餘額來自官方每日快照（常駐清單股票由排程逐日累積，歷史只會從加入清單後開始有）。</span></p>
     `;
 
     sections.push(reportSection(`四、數據總整理（結合三大法人，回看 ${lookback} 日）`, structHtml + marginLendingHtml));
