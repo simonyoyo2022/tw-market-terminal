@@ -7,7 +7,7 @@
 // could get stuck showing an old cached version for a long time.
 //
 // Bump CACHE_VERSION any time you want to force clients to drop old caches.
-const CACHE_VERSION = "tif-v12";
+const CACHE_VERSION = "tif-v14";
 // Separate, deliberately version-independent bucket: app.js stores a backup
 // copy of the GitHub token here (Cache Storage has been observed surviving
 // on iOS Safari when localStorage for this app got cleared — see app.js for
