@@ -27,6 +27,12 @@ jobs:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: node scripts/fetch-data.mjs --scope=evening
 
+      - name: Run 借券空單回補哨兵 (Telegram notify)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/notify-sentinel.mjs
+
       - name: Commit and push if data changed
         run: |
           git config user.name "github-actions[bot]"
